@@ -150,30 +150,35 @@ export default function BudgetScreen() {
     const totalBudget = budgets.reduce((sum, budget) => sum + budget.budget, 0);
 
     const handleAddBudget = async () => {
-        // 1. Checks if fields are empty. (They are not, so it continues)
-        if (!newBudgetCategory || !newBudgetAmount) {
+        console.log('Add Budget button pressed'); // Debug log
+        console.log('Category:', newBudgetCategory); // Debug log
+        console.log('Amount:', newBudgetAmount); // Debug log
+
+        // Trim whitespace from inputs
+        const categoryInput = newBudgetCategory.trim();
+        const amountInput = newBudgetAmount.trim();
+
+        // 1. Check if fields are empty
+        if (!categoryInput || !amountInput) {
             Alert.alert('Error', 'Please fill in all fields');
             return;
         }
 
-        // 2. Tries to convert `newBudgetAmount` ("shopping") to a number
-        const amount = parseFloat(newBudgetAmount);
+        // 2. Try to convert amount to a number
+        const amount = parseFloat(amountInput);
         
-        // 3. `parseFloat("shopping")` is NaN (Not a Number).
-        // 4. `isNaN(amount)` is TRUE, so it enters this `if` block.
+        // 3. Validate the amount
         if (isNaN(amount) || amount <= 0) {
-            // 5. It shows this alert, which is what you are seeing.
-            Alert.alert('Error', 'Please enter a valid amount');
-            return; // 6. It stops here.
+            Alert.alert('Error', 'Please enter a valid amount (numbers only)');
+            return;
         }
 
-        // This code below is never reached because of the error above.
-        // If you swap the inputs, this code will run.
-
-        // Use the category name as the ID (lowercase)
-        const categoryKey = newBudgetCategory.toLowerCase().trim();
+        // 4. Use the category name as the ID (lowercase)
+        const categoryKey = categoryInput.toLowerCase();
 
         try {
+            console.log('Saving budget:', categoryKey, amount); // Debug log
+            
             // Save to Firebase
             await saveBudget(categoryKey, amount);
             
@@ -184,13 +189,15 @@ export default function BudgetScreen() {
             }));
 
             Alert.alert('Success', 'Budget category added successfully!');
+            
+            // Close modal and reset fields
             setModalVisible(false);
             setNewBudgetCategory("");
             setNewBudgetAmount("");
 
         } catch (error) {
             console.error('Error saving budget:', error);
-            Alert.alert('Error', 'Failed to save budget.');
+            Alert.alert('Error', 'Failed to save budget. Please try again.\n\n' + error.message);
         }
     };
 
@@ -242,7 +249,10 @@ export default function BudgetScreen() {
                             <Text style={styles.sectionTitle}>Budget Categories</Text>
                             <TouchableOpacity
                                 style={styles.addButton}
-                                onPress={() => setModalVisible(true)}
+                                onPress={() => {
+                                    console.log('Opening modal...'); // Debug log
+                                    setModalVisible(true);
+                                }}
                             >
                                 <Ionicons name="add" size={20} color={theme.colors.primary} />
                                 <Text style={styles.addButtonText}>Add</Text>
@@ -288,7 +298,10 @@ export default function BudgetScreen() {
                 animationType="slide"
                 transparent={true}
                 visible={modalVisible}
-                onRequestClose={() => setModalVisible(false)}
+                onRequestClose={() => {
+                    console.log('Modal closing...'); // Debug log
+                    setModalVisible(false);
+                }}
             >
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
@@ -303,21 +316,31 @@ export default function BudgetScreen() {
                             <TextInput
                                 style={styles.modalInput}
                                 value={newBudgetCategory}
-                                onChangeText={setNewBudgetCategory}
+                                onChangeText={(text) => {
+                                    console.log('Category input:', text); // Debug log
+                                    setNewBudgetCategory(text);
+                                }}
                                 placeholder="e.g., Groceries, Gas, etc."
                                 placeholderTextColor={theme.colors.text_secondary}
                             />
-                            <Text style={styles.inputLabel}>Budget Amount</Text>
+                            <Text style={styles.inputLabel}>Budget Amount (Rs.)</Text>
                             <TextInput
                                 style={styles.modalInput}
                                 value={newBudgetAmount}
-                                onChangeText={setNewBudgetAmount}
-                                placeholder="0.00"
+                                onChangeText={(text) => {
+                                    console.log('Amount input:', text); // Debug log
+                                    setNewBudgetAmount(text);
+                                }}
+                                placeholder="5000"
                                 keyboardType="numeric"
                                 placeholderTextColor={theme.colors.text_secondary}
                             />
                         </View>
-                        <TouchableOpacity style={styles.saveButton} onPress={handleAddBudget}>
+                        <TouchableOpacity 
+                            style={styles.saveButton} 
+                            onPress={handleAddBudget}
+                            activeOpacity={0.7}
+                        >
                             <Text style={styles.saveButtonText}>Add Budget</Text>
                         </TouchableOpacity>
                     </View>
@@ -436,7 +459,7 @@ const styles = StyleSheet.create({
         fontSize: theme.fontSize.base,
         fontWeight: '600',
         color: theme.colors.text_primary,
-        textTransform: 'capitalize', // To make dynamic categories look nice
+        textTransform: 'capitalize',
     },
     budgetAmounts: {
         fontSize: theme.fontSize.sm,
@@ -498,6 +521,8 @@ const styles = StyleSheet.create({
         fontSize: theme.fontSize.base,
         color: theme.colors.text_primary,
         marginBottom: theme.spacing.md,
+        borderWidth: 1,
+        borderColor: theme.colors.gray[700],
     },
     saveButton: {
         backgroundColor: theme.colors.primary,
