@@ -6,6 +6,10 @@ export const theme = {
         success: '#10b981', //
         danger: '#ef4444', //
         
+        // FIX: Add missing gradient colors used by BudgetCard.js
+        gradient_primary_start: '#34d399', // A lighter green
+        gradient_primary_end: '#10b981',   // The primary green
+
         // Dark Theme Palette
         background: '#111827', // Near-black background (was gray.900)
         surface: '#1f2937',    // Dark gray for cards/surfaces (was gray.800)

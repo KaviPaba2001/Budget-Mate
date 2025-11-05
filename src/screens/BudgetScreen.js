@@ -14,7 +14,8 @@ import {
 } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import BudgetCard from '../components/BudgetCard';
-import { getTransactions } from '../services/firebaseService';
+// Import the new budget functions
+import { getBudgets, getTransactions, saveBudget, seedDefaultBudgets } from '../services/firebaseService';
 import { theme } from '../styles/theme';
 
 // Animated component for staggered entry
@@ -41,38 +42,34 @@ export default function BudgetScreen() {
     const [newBudgetAmount, setNewBudgetAmount] = useState("");
     const [transactions, setTransactions] = useState([]);
     const [loading, setLoading] = useState(true);
+    // This will hold the budgets loaded from Firebase
     const [categoryBudgets, setCategoryBudgets] = useState({});
 
-    // Default category budgets (you can save these to Firebase later)
-    const defaultBudgets = {
-        'food': 12000,
-        'transport': 6000,
-        'utilities': 4000,
-        'shopping': 5000,
-        'entertainment': 3000,
-        'health': 5000,
-    };
-
-    // Load transactions when screen comes into focus
+    // Load transactions and budgets when screen comes into focus
     useFocusEffect(
         useCallback(() => {
-            loadTransactions();
+            loadData();
         }, [])
     );
 
-    const loadTransactions = async () => {
+    const loadData = async () => {
         setLoading(true);
         try {
-            const data = await getTransactions();
-            setTransactions(data);
-            
-            // Initialize budgets if not set
-            if (Object.keys(categoryBudgets).length === 0) {
-                setCategoryBudgets(defaultBudgets);
+            // Fetch both transactions and budgets
+            const transactionData = await getTransactions();
+            let budgetsData = await getBudgets();
+
+            // If no budgets, seed the default ones
+            if (Object.keys(budgetsData).length === 0) {
+                budgetsData = await seedDefaultBudgets();
             }
+            
+            setTransactions(transactionData);
+            setCategoryBudgets(budgetsData);
+
         } catch (error) {
-            console.error('Error loading transactions:', error);
-            Alert.alert('Error', 'Failed to load transactions');
+            console.error('Error loading data:', error);
+            Alert.alert('Error', 'Failed to load data');
         } finally {
             setLoading(false);
         }
@@ -137,9 +134,12 @@ export default function BudgetScreen() {
             'health': 'medical',
         };
 
+        // Handle dynamically added categories
+        const displayName = categoryNames[categoryKey] || categoryKey.charAt(0).toUpperCase() + categoryKey.slice(1);
+
         return {
             id: categoryKey,
-            category: categoryNames[categoryKey] || categoryKey,
+            category: displayName,
             spent: categorySpending[categoryKey] || 0,
             budget: categoryBudgets[categoryKey],
             icon: categoryIcons[categoryKey] || 'ellipsis-horizontal',
@@ -149,28 +149,49 @@ export default function BudgetScreen() {
     const totalSpent = budgets.reduce((sum, budget) => sum + budget.spent, 0);
     const totalBudget = budgets.reduce((sum, budget) => sum + budget.budget, 0);
 
-    const handleAddBudget = () => {
+    const handleAddBudget = async () => {
+        // 1. Checks if fields are empty. (They are not, so it continues)
         if (!newBudgetCategory || !newBudgetAmount) {
             Alert.alert('Error', 'Please fill in all fields');
             return;
         }
 
+        // 2. Tries to convert `newBudgetAmount` ("shopping") to a number
         const amount = parseFloat(newBudgetAmount);
+        
+        // 3. `parseFloat("shopping")` is NaN (Not a Number).
+        // 4. `isNaN(amount)` is TRUE, so it enters this `if` block.
         if (isNaN(amount) || amount <= 0) {
+            // 5. It shows this alert, which is what you are seeing.
             Alert.alert('Error', 'Please enter a valid amount');
-            return;
+            return; // 6. It stops here.
         }
 
-        // Add new budget
-        setCategoryBudgets(prev => ({
-            ...prev,
-            [newBudgetCategory.toLowerCase()]: amount,
-        }));
+        // This code below is never reached because of the error above.
+        // If you swap the inputs, this code will run.
 
-        Alert.alert('Success', 'Budget category added successfully!');
-        setModalVisible(false);
-        setNewBudgetCategory("");
-        setNewBudgetAmount("");
+        // Use the category name as the ID (lowercase)
+        const categoryKey = newBudgetCategory.toLowerCase().trim();
+
+        try {
+            // Save to Firebase
+            await saveBudget(categoryKey, amount);
+            
+            // Update local state to reflect change instantly
+            setCategoryBudgets(prev => ({
+                ...prev,
+                [categoryKey]: amount,
+            }));
+
+            Alert.alert('Success', 'Budget category added successfully!');
+            setModalVisible(false);
+            setNewBudgetCategory("");
+            setNewBudgetAmount("");
+
+        } catch (error) {
+            console.error('Error saving budget:', error);
+            Alert.alert('Error', 'Failed to save budget.');
+        }
     };
 
     if (loading) {
@@ -415,6 +436,7 @@ const styles = StyleSheet.create({
         fontSize: theme.fontSize.base,
         fontWeight: '600',
         color: theme.colors.text_primary,
+        textTransform: 'capitalize', // To make dynamic categories look nice
     },
     budgetAmounts: {
         fontSize: theme.fontSize.sm,

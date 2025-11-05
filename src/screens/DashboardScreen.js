@@ -16,7 +16,8 @@ import AnimatedPressable from '../components/AnimatedPressable';
 import AnimatedView from '../components/AnimatedView';
 import BudgetCard from '../components/BudgetCard';
 import { useUser } from '../context/UserContext';
-import { getTransactions } from '../services/firebaseService';
+// Import the new budget functions
+import { getBudgets, getTransactions, seedDefaultBudgets } from '../services/firebaseService';
 import { theme } from '../styles/theme';
 
 export default function DashboardScreen({ navigation }) {
@@ -27,23 +28,37 @@ export default function DashboardScreen({ navigation }) {
     const [monthlySpending, setMonthlySpending] = useState(0);
     const [monthlyIncome, setMonthlyIncome] = useState(0);
 
-    const monthlyBudget = 15000.00; // You can make this dynamic later
+    // This is now loaded from Firebase
+    const [monthlyBudget, setMonthlyBudget] = useState(0);
 
     // Load transactions when screen comes into focus
     useFocusEffect(
         useCallback(() => {
-            loadTransactions();
+            loadData();
         }, [])
     );
 
-    const loadTransactions = async () => {
+    // Renamed from loadTransactions to loadData
+    const loadData = async () => {
         setLoading(true);
         try {
+            // Get transactions and calculate financials
             const data = await getTransactions();
             setTransactions(data);
             calculateFinancials(data);
+
+            // Get budgets and calculate total
+            let budgetsData = await getBudgets();
+            if (Object.keys(budgetsData).length === 0) {
+                // If no budgets exist, seed them
+                budgetsData = await seedDefaultBudgets();
+            }
+            // Calculate total budget from all categories
+            const total = Object.values(budgetsData).reduce((sum, amount) => sum + amount, 0);
+            setMonthlyBudget(total);
+
         } catch (error) {
-            console.error('Error loading transactions:', error);
+            console.error('Error loading dashboard data:', error);
         } finally {
             setLoading(false);
         }
@@ -162,7 +177,8 @@ export default function DashboardScreen({ navigation }) {
                     <Text style={styles.balanceLabel}>Current Balance</Text>
                     <Text style={[
                         styles.balanceAmount,
-                        { color: currentBalance >= 0 ? theme.colors.success : theme.colors.danger }
+                        // This fix is still applied
+                        { color: currentBalance >= 0 ? theme.colors.white : theme.colors.danger }
                     ]}>
                         Rs. {currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </Text>
@@ -208,6 +224,7 @@ export default function DashboardScreen({ navigation }) {
                     <Text style={styles.sectionTitle}>This Month's Budget</Text>
                     <BudgetCard
                         spent={monthlySpending}
+                        // Use the total budget from state (loaded from Firebase)
                         budget={monthlyBudget}
                     />
                 </View>

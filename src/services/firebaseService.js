@@ -6,9 +6,11 @@ import {
     getDocs,
     orderBy,
     query,
+    setDoc,
     Timestamp,
     updateDoc,
-    where
+    where,
+    writeBatch // FIX: Import writeBatch at the top
 } from 'firebase/firestore';
 import { auth, db } from '../../firebase';
 
@@ -20,6 +22,18 @@ const getUserId = () => {
     }
     return user.uid;
 };
+
+// --- Default Budgets (for new users) ---
+const defaultBudgets = {
+    'food': 12000,
+    'transport': 6000,
+    'utilities': 4000,
+    'shopping': 5000,
+    'entertainment': 3000,
+    'health': 5000,
+};
+
+// --- Transaction Functions ---
 
 // Add a new transaction
 export const addTransaction = async (transactionData) => {
@@ -149,6 +163,80 @@ export const getTransactionsByCategory = async (category) => {
         return transactions;
     } catch (error) {
         console.error('Error getting transactions by category:', error);
+        throw error;
+    }
+};
+
+
+// --- NEW BUDGET FUNCTIONS ---
+
+/**
+ * Gets all budgets for the current user.
+ * Returns an object (e.g., {'food': 12000, 'transport': 6000})
+ */
+export const getBudgets = async () => {
+    try {
+        const userId = getUserId();
+        const budgetsRef = collection(db, 'users', userId, 'budgets');
+        const querySnapshot = await getDocs(budgetsRef);
+        
+        const budgets = {};
+        if (querySnapshot.empty) {
+            console.log('No budgets found for user. Seeding default budgets...');
+            // Return empty object, the screen will call seedDefaultBudgets
+            return {};
+        }
+
+        querySnapshot.forEach((doc) => {
+            budgets[doc.id] = doc.data().amount;
+        });
+        
+        return budgets;
+    } catch (error) {
+        console.error('Error getting budgets:', error);
+        throw error;
+    }
+};
+
+/**
+ * Creates or updates a specific budget category for the user.
+ * @param {string} category - The category ID (e.g., 'food')
+ * @param {number} amount - The budget amount
+ */
+export const saveBudget = async (category, amount) => {
+    try {
+        const userId = getUserId();
+        const budgetRef = doc(db, 'users', userId, 'budgets', category);
+        
+        await setDoc(budgetRef, { amount: amount });
+        return { id: category, amount: amount };
+    } catch (error) {
+        console.error('Error saving budget:', error);
+        throw error;
+    }
+};
+
+/**
+ * Saves the default budgets for a new user.
+ */
+export const seedDefaultBudgets = async () => {
+    try {
+        const userId = getUserId();
+        const budgetsRef = collection(db, 'users', userId, 'budgets');
+        
+        // FIX: Use the imported writeBatch function
+        const batch = writeBatch(db);
+
+        for (const [category, amount] of Object.entries(defaultBudgets)) {
+            const docRef = doc(budgetsRef, category);
+            batch.set(docRef, { amount: amount });
+        }
+        
+        await batch.commit();
+        console.log('Default budgets seeded successfully.');
+        return defaultBudgets;
+    } catch (error) {
+        console.error('Error seeding default budgets:', error);
         throw error;
     }
 };
