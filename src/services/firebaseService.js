@@ -10,7 +10,7 @@ import {
     Timestamp,
     updateDoc,
     where,
-    writeBatch // FIX: Import writeBatch at the top
+    writeBatch
 } from 'firebase/firestore';
 import { auth, db } from '../../firebase';
 
@@ -97,17 +97,32 @@ export const updateTransaction = async (transactionId, updates) => {
     }
 };
 
-// Delete a transaction
+// Delete a transaction - WITH ENHANCED DEBUGGING
 export const deleteTransaction = async (transactionId) => {
     try {
-        const userId = getUserId();
-        const transactionRef = doc(db, 'users', userId, 'transactions', transactionId);
+        console.log('=== deleteTransaction called ===');
+        console.log('Transaction ID to delete:', transactionId);
         
+        const userId = getUserId();
+        console.log('User ID:', userId);
+        
+        const transactionRef = doc(db, 'users', userId, 'transactions', transactionId);
+        console.log('Document reference path:', transactionRef.path);
+        
+        console.log('Attempting to delete document...');
         await deleteDoc(transactionRef);
+        
+        console.log('✅ Delete successful!');
         return transactionId;
     } catch (error) {
-        console.error('Error deleting transaction:', error);
-        throw error;
+        console.error('=== deleteTransaction ERROR ===');
+        console.error('Error name:', error.name);
+        console.error('Error message:', error.message);
+        console.error('Error code:', error.code);
+        console.error('Full error object:', error);
+        
+        // Throw with more context
+        throw new Error(`Failed to delete transaction: ${error.message} (Code: ${error.code || 'unknown'})`);
     }
 };
 
@@ -168,7 +183,7 @@ export const getTransactionsByCategory = async (category) => {
 };
 
 
-// --- NEW BUDGET FUNCTIONS ---
+// --- BUDGET FUNCTIONS ---
 
 /**
  * Gets all budgets for the current user.
@@ -183,7 +198,6 @@ export const getBudgets = async () => {
         const budgets = {};
         if (querySnapshot.empty) {
             console.log('No budgets found for user. Seeding default budgets...');
-            // Return empty object, the screen will call seedDefaultBudgets
             return {};
         }
 
@@ -224,7 +238,6 @@ export const seedDefaultBudgets = async () => {
         const userId = getUserId();
         const budgetsRef = collection(db, 'users', userId, 'budgets');
         
-        // FIX: Use the imported writeBatch function
         const batch = writeBatch(db);
 
         for (const [category, amount] of Object.entries(defaultBudgets)) {

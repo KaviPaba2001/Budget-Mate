@@ -10,6 +10,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import { auth } from '../../firebase';
 import CategoryPicker from '../components/CategoryPicker';
 import { deleteTransaction, updateTransaction } from '../services/firebaseService';
 import { theme } from '../styles/theme';
@@ -62,45 +63,65 @@ export default function TransactionDetailScreen({ navigation, route }) {
 
             await updateTransaction(transaction.id, updates);
 
-            // Navigate back immediately after successful update
             navigation.goBack();
             
-            // Show success message after navigation
             setTimeout(() => {
                 Alert.alert('Success', 'Transaction updated successfully!');
             }, 500);
         } catch (error) {
             console.error('Error updating transaction:', error);
-            Alert.alert('Error', 'Failed to update transaction. Please try again.');
+            Alert.alert('Error', 'Failed to update transaction. Please try again.\n\n' + error.message);
             setLoading(false);
         }
     };
 
     const handleDelete = () => {
+        console.log('=== DELETE BUTTON PRESSED ===');
+        console.log('Transaction ID:', transaction.id);
+        console.log('Current User:', auth.currentUser?.uid);
+        console.log('Transaction data:', transaction);
+
         Alert.alert(
             'Delete Transaction',
             'Are you sure you want to delete this transaction? This action cannot be undone.',
             [
-                { text: 'Cancel', style: 'cancel' },
+                { 
+                    text: 'Cancel', 
+                    style: 'cancel',
+                    onPress: () => console.log('Delete cancelled')
+                },
                 {
                     text: 'Delete',
                     style: 'destructive',
                     onPress: async () => {
+                        console.log('Delete confirmed, starting deletion...');
                         setLoading(true);
+                        
                         try {
-                            await deleteTransaction(transaction.id);
-                            Alert.alert('Success', 'Transaction deleted successfully!', [
-                                {
-                                    text: 'OK',
-                                    onPress: () => {
-                                        navigation.navigate('TransactionsList', { refresh: true });
-                                    },
-                                },
-                            ]);
+                            console.log('Calling deleteTransaction function...');
+                            const result = await deleteTransaction(transaction.id);
+                            console.log('Delete result:', result);
+                            
+                            console.log('Navigating back...');
+                            navigation.goBack();
+                            
+                            setTimeout(() => {
+                                console.log('Showing success alert');
+                                Alert.alert('Success', 'Transaction deleted successfully!');
+                            }, 300);
                         } catch (error) {
-                            console.error('Error deleting transaction:', error);
-                            Alert.alert('Error', 'Failed to delete transaction. Please try again.');
+                            console.error('=== DELETE ERROR ===');
+                            console.error('Error type:', error.name);
+                            console.error('Error message:', error.message);
+                            console.error('Error code:', error.code);
+                            console.error('Full error:', error);
+                            
                             setLoading(false);
+                            
+                            Alert.alert(
+                                'Error', 
+                                `Failed to delete transaction.\n\nError: ${error.message}\n\nCode: ${error.code || 'N/A'}`
+                            );
                         }
                     },
                 },
@@ -286,6 +307,7 @@ export default function TransactionDetailScreen({ navigation, route }) {
                         <TouchableOpacity
                             style={[styles.actionButton, styles.cancelButton]}
                             onPress={handleCancel}
+                            activeOpacity={0.7}
                         >
                             <Ionicons name="close" size={20} color={theme.colors.text_primary} />
                             <Text style={styles.cancelButtonText}>Cancel</Text>
@@ -293,6 +315,7 @@ export default function TransactionDetailScreen({ navigation, route }) {
                         <TouchableOpacity
                             style={[styles.actionButton, styles.saveButton]}
                             onPress={handleSave}
+                            activeOpacity={0.7}
                         >
                             <Ionicons name="checkmark" size={20} color={theme.colors.white} />
                             <Text style={styles.saveButtonText}>Save Changes</Text>
@@ -303,6 +326,7 @@ export default function TransactionDetailScreen({ navigation, route }) {
                         <TouchableOpacity
                             style={[styles.actionButton, styles.deleteButton]}
                             onPress={handleDelete}
+                            activeOpacity={0.7}
                         >
                             <Ionicons name="trash-outline" size={20} color={theme.colors.white} />
                             <Text style={styles.deleteButtonText}>Delete</Text>
@@ -310,6 +334,7 @@ export default function TransactionDetailScreen({ navigation, route }) {
                         <TouchableOpacity
                             style={[styles.actionButton, styles.editButton]}
                             onPress={() => setIsEditing(true)}
+                            activeOpacity={0.7}
                         >
                             <Ionicons name="create-outline" size={20} color={theme.colors.white} />
                             <Text style={styles.editButtonText}>Edit</Text>
