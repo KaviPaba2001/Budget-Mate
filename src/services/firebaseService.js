@@ -141,7 +141,7 @@ export const deleteTransaction = async (transactionId) => {
             throw new Error('Invalid transaction ID');
         }
         
-        // Create document reference
+        // Create document reference: users/{userId}/transactions/{transactionId}
         const transactionRef = doc(db, 'users', userId, 'transactions', transactionId);
         console.log('Document reference path:', transactionRef.path);
         console.log('Full path: users/' + userId + '/transactions/' + transactionId);
@@ -165,7 +165,7 @@ export const deleteTransaction = async (transactionId) => {
         if (error.code === 'permission-denied') {
             console.error('❌ PERMISSION DENIED - Check Firestore security rules');
             console.error('Make sure the rules allow delete for this user');
-            throw new Error('Permission denied. You do not have permission to delete this transaction.');
+            throw new Error('Permission denied. You do not have permission to delete this transaction. (Check Firestore Rules)');
         } else if (error.code === 'not-found') {
             console.error('❌ NOT FOUND - Transaction does not exist');
             throw new Error('Transaction not found. It may have already been deleted.');

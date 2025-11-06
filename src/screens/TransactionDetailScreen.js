@@ -118,9 +118,13 @@ export default function TransactionDetailScreen({ navigation, route }) {
                             
                             setLoading(false);
                             
+                            // ENHANCED ALERT FOR DEBUGGING
                             Alert.alert(
-                                'Error', 
-                                `Failed to delete transaction.\n\nError: ${error.message}\n\nCode: ${error.code || 'N/A'}`
+                                'Failed to Delete Transaction',
+                                `Deletion failed. This is almost certainly a Firebase Security Rule issue.\n\n` +
+                                `Current User ID: ${auth.currentUser?.uid || 'Not Found'}\n` +
+                                `Error: ${error.message}\n\nACTION: Go to Firebase Console -> Firestore -> Rules and ensure the rule below is PUBLISHED.`,
+                                [{ text: 'OK' }]
                             );
                         }
                     },
