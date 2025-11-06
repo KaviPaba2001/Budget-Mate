@@ -1,22 +1,22 @@
-import React from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator, TransitionPresets } from '@react-navigation/stack';
-import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../styles/theme';
-import { Text } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { Text } from 'react-native';
+import { theme } from '../styles/theme';
 
 // Import all screens
-import DashboardScreen from '../screens/DashboardScreen';
-import TransactionsScreen from '../screens/TransactionsScreen';
-import ReportsScreen from '../screens/ReportsScreen';
-import BudgetScreen from '../screens/BudgetScreen';
-import SettingsScreen from '../screens/SettingsScreen';
-import AddTransactionScreen from '../screens/AddTransactionScreen';
-import ScanReceiptScreen from '../screens/ScanReceiptScreen';
-import CardsScreen from '../screens/CardsScreen';
+import AboutScreen from '../screens/AboutScreen';
 import AddCardScreen from '../screens/AddCardScreen';
-import AboutScreen from '../screens/AboutScreen'; // New
+import AddTransactionScreen from '../screens/AddTransactionScreen';
+import BudgetScreen from '../screens/BudgetScreen';
+import CardsScreen from '../screens/CardsScreen';
+import DashboardScreen from '../screens/DashboardScreen';
+import ReportsScreen from '../screens/ReportsScreen';
+import ScanReceiptScreen from '../screens/ScanReceiptScreen';
+import SettingsScreen from '../screens/SettingsScreen';
+import TransactionDetailScreen from '../screens/TransactionDetailScreen';
+import TransactionsScreen from '../screens/TransactionsScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -33,6 +33,7 @@ function TransactionsStack() {
     return (
         <Stack.Navigator screenOptions={{ ...darkHeaderOptions, ...screenTransitionOptions }}>
             <Stack.Screen name="TransactionsList" component={TransactionsScreen} options={{ headerShown: false }} />
+            <Stack.Screen name="TransactionDetail" component={TransactionDetailScreen} options={{ title: 'Transaction Details' }} />
             <Stack.Screen name="AddTransaction" component={AddTransactionScreen} options={{ title: 'Add Transaction' }} />
             <Stack.Screen name="ScanReceipt" component={ScanReceiptScreen} options={{ title: 'Scan Receipt' }} />
         </Stack.Navigator>
@@ -58,19 +59,19 @@ function DashboardStack() {
     );
 }
 
-// New: Stack for Settings and its sub-screens
-function SettingsStack() {
+// Settings Stack with onLogout prop
+function SettingsStack({ onLogout }) {
     return (
         <Stack.Navigator screenOptions={{ ...darkHeaderOptions, ...screenTransitionOptions }}>
-            <Stack.Screen name="SettingsHome" component={SettingsScreen} options={{ title: "Settings" }} />
+            <Stack.Screen name="SettingsHome" options={{ title: "Settings" }}>
+                {props => <SettingsScreen {...props} onLogout={onLogout} />}
+            </Stack.Screen>
             <Stack.Screen name="About" component={AboutScreen} options={{ title: "About" }} />
-            {/* You can add other settings sub-screens here in the future */}
         </Stack.Navigator>
     );
 }
 
-
-export default function AppNavigator() {
+export default function AppNavigator({ onLogout }) {
     return (
         <Tab.Navigator
             screenOptions={({ route }) => ({
@@ -111,12 +112,12 @@ export default function AppNavigator() {
                 options={{ headerShown: true, title: "Budget", ...darkHeaderOptions }}
                 listeners={{ tabPress: () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) }}
             />
-            {/* The Settings tab now points to the new SettingsStack */}
             <Tab.Screen 
                 name="Settings" 
-                component={SettingsStack} 
                 listeners={{ tabPress: () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) }}
-            />
+            >
+                {props => <SettingsStack {...props} onLogout={onLogout} />}
+            </Tab.Screen>
         </Tab.Navigator>
     );
 }

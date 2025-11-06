@@ -3,7 +3,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import EmptyState from '../components/EmptyState';
-import { deleteTransaction, getTransactions } from '../services/firebaseService';
+import { getTransactions } from '../services/firebaseService';
 import { theme } from '../styles/theme';
 
 export default function TransactionsScreen({ navigation, route }) {
@@ -42,6 +42,7 @@ export default function TransactionsScreen({ navigation, route }) {
                 type: transaction.type,
                 date: formatDate(transaction.date || transaction.createdAt?.toDate()),
                 note: transaction.note || '',
+                createdAt: transaction.createdAt, // Keep for detail screen
             }));
             
             setTransactions(formattedTransactions);
@@ -63,30 +64,6 @@ export default function TransactionsScreen({ navigation, route }) {
         return `${year}-${month}-${day}`;
     };
 
-    const handleDeleteTransaction = (transactionId, transactionTitle) => {
-        Alert.alert(
-            'Delete Transaction',
-            `Are you sure you want to delete "${transactionTitle}"?`,
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Delete',
-                    style: 'destructive',
-                    onPress: async () => {
-                        try {
-                            await deleteTransaction(transactionId);
-                            setTransactions(prev => prev.filter(t => t.id !== transactionId));
-                            Alert.alert('Success', 'Transaction deleted successfully');
-                        } catch (error) {
-                            console.error('Error deleting transaction:', error);
-                            Alert.alert('Error', 'Failed to delete transaction');
-                        }
-                    }
-                }
-            ]
-        );
-    };
-
     const filteredTransactions = transactions.filter(transaction => {
         const matchesSearch = transaction.title.toLowerCase().includes(searchQuery.toLowerCase());
         const matchesFilter = 
@@ -99,7 +76,8 @@ export default function TransactionsScreen({ navigation, route }) {
     const renderTransaction = ({ item }) => (
         <TouchableOpacity 
             style={styles.transactionItem}
-            onLongPress={() => handleDeleteTransaction(item.id, item.title)}
+            onPress={() => navigation.navigate('TransactionDetail', { transaction: item })}
+            activeOpacity={0.7}
         >
             <View style={styles.transactionIcon}>
                 <Ionicons 
@@ -121,6 +99,7 @@ export default function TransactionsScreen({ navigation, route }) {
                 </Text>
                 <Text style={styles.transactionDate}>{item.date}</Text>
             </View>
+            <Ionicons name="chevron-forward" size={20} color={theme.colors.text_secondary} style={{ marginLeft: theme.spacing.sm }} />
         </TouchableOpacity>
     );
 

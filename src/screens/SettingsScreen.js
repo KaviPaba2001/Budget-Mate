@@ -113,13 +113,20 @@ export default function SettingsScreen({ navigation, onLogout }) {
         }
     };
 
-    // DIRECT LOGOUT - NO POPUP
+    // LOGOUT HANDLER
     const handleLogout = () => {
-        console.log('Direct logout triggered');
+        console.log('=== LOGOUT BUTTON PRESSED ===');
+        console.log('onLogout prop exists:', !!onLogout);
+        console.log('onLogout is function:', typeof onLogout === 'function');
+        
         if (onLogout && typeof onLogout === 'function') {
-            onLogout(); // Directly call logout function
+            console.log('Calling onLogout function...');
+            onLogout();
+            console.log('onLogout function called successfully');
         } else {
-            console.error('onLogout function not available');
+            console.error('ERROR: onLogout function not available');
+            console.error('onLogout value:', onLogout);
+            Alert.alert('Error', 'Logout function is not available. Please restart the app.');
         }
     };
 
@@ -287,7 +294,6 @@ export default function SettingsScreen({ navigation, onLogout }) {
                                         Alert.alert('Error', 'PIN must be at least 4 digits.');
                                         return;
                                     }
-                                    // Add real PIN validation logic here
                                     Alert.alert('Success', 'PIN changed successfully.');
                                     setCurrentPin('');
                                     setNewPin('');
@@ -323,8 +329,8 @@ const styles = StyleSheet.create({
     settingAction: { justifyContent: 'center' },
     
     // LOGOUT STYLES
-    logoutItem: { backgroundColor: '#FEF2F2' },
-    logoutIcon: { backgroundColor: '#FEE2E2' },
+    logoutItem: { backgroundColor: 'rgba(239, 68, 68, 0.1)' },
+    logoutIcon: { backgroundColor: 'rgba(239, 68, 68, 0.2)' },
     logoutText: { color: '#EF4444', fontWeight: '600' },
     
     // IMAGE MODAL
@@ -341,4 +347,4 @@ const styles = StyleSheet.create({
     modalButtonCancel: { backgroundColor: '#6B7280', paddingVertical: theme.spacing.sm, paddingHorizontal: theme.spacing.lg, borderRadius: theme.borderRadius.md },
     modalButtonSave: { backgroundColor: theme.colors.primary, paddingVertical: theme.spacing.sm, paddingHorizontal: theme.spacing.lg, borderRadius: theme.borderRadius.md },
     modalButtonText: { color: theme.colors.white, fontWeight: '600' },
-});
+}); 
