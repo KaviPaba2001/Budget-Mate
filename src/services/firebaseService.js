@@ -48,6 +48,7 @@ export const addTransaction = async (transactionData) => {
         };
         
         const docRef = await addDoc(transactionsRef, transaction);
+        console.log('Transaction added successfully:', docRef.id);
         return { id: docRef.id, ...transaction };
     } catch (error) {
         console.error('Error adding transaction:', error);
@@ -72,6 +73,7 @@ export const getTransactions = async () => {
             });
         });
         
+        console.log(`Retrieved ${transactions.length} transactions`);
         return transactions;
     } catch (error) {
         console.error('Error getting transactions:', error);
@@ -82,47 +84,101 @@ export const getTransactions = async () => {
 // Update a transaction
 export const updateTransaction = async (transactionId, updates) => {
     try {
+        console.log('=== updateTransaction called ===');
+        console.log('Transaction ID:', transactionId);
+        console.log('Updates:', updates);
+        
         const userId = getUserId();
         const transactionRef = doc(db, 'users', userId, 'transactions', transactionId);
         
-        await updateDoc(transactionRef, {
+        const updateData = {
             ...updates,
             updatedAt: Timestamp.now(),
-        });
+        };
         
-        return { id: transactionId, ...updates };
+        await updateDoc(transactionRef, updateData);
+        
+        console.log('✅ Update successful!');
+        return { id: transactionId, ...updateData };
     } catch (error) {
-        console.error('Error updating transaction:', error);
+        console.error('=== updateTransaction ERROR ===');
+        console.error('Error name:', error.name);
+        console.error('Error message:', error.message);
+        console.error('Error code:', error.code);
+        console.error('Full error object:', error);
+        
+        if (error.code === 'permission-denied') {
+            throw new Error('Permission denied. Please check your security settings.');
+        } else if (error.code === 'not-found') {
+            throw new Error('Transaction not found.');
+        }
+        
         throw error;
     }
 };
 
-// Delete a transaction - WITH ENHANCED DEBUGGING
+// Delete a transaction - ENHANCED VERSION
 export const deleteTransaction = async (transactionId) => {
     try {
         console.log('=== deleteTransaction called ===');
         console.log('Transaction ID to delete:', transactionId);
         
-        const userId = getUserId();
-        console.log('User ID:', userId);
+        // Check if user is authenticated
+        const user = auth.currentUser;
+        if (!user) {
+            console.error('No user authenticated');
+            throw new Error('User not authenticated. Please log in again.');
+        }
         
+        const userId = user.uid;
+        console.log('User ID:', userId);
+        console.log('User email:', user.email);
+        console.log('User authenticated:', !!user);
+        
+        // Verify the transaction ID is valid
+        if (!transactionId || typeof transactionId !== 'string') {
+            console.error('Invalid transaction ID:', transactionId);
+            throw new Error('Invalid transaction ID');
+        }
+        
+        // Create document reference
         const transactionRef = doc(db, 'users', userId, 'transactions', transactionId);
         console.log('Document reference path:', transactionRef.path);
+        console.log('Full path: users/' + userId + '/transactions/' + transactionId);
         
+        // Attempt to delete
         console.log('Attempting to delete document...');
         await deleteDoc(transactionRef);
         
         console.log('✅ Delete successful!');
+        console.log('Transaction deleted:', transactionId);
+        
         return transactionId;
     } catch (error) {
         console.error('=== deleteTransaction ERROR ===');
         console.error('Error name:', error.name);
         console.error('Error message:', error.message);
         console.error('Error code:', error.code);
-        console.error('Full error object:', error);
+        console.error('Error stack:', error.stack);
         
-        // Throw with more context
-        throw new Error(`Failed to delete transaction: ${error.message} (Code: ${error.code || 'unknown'})`);
+        // Handle specific Firebase errors
+        if (error.code === 'permission-denied') {
+            console.error('❌ PERMISSION DENIED - Check Firestore security rules');
+            console.error('Make sure the rules allow delete for this user');
+            throw new Error('Permission denied. You do not have permission to delete this transaction.');
+        } else if (error.code === 'not-found') {
+            console.error('❌ NOT FOUND - Transaction does not exist');
+            throw new Error('Transaction not found. It may have already been deleted.');
+        } else if (error.code === 'unavailable') {
+            console.error('❌ UNAVAILABLE - Network issue or Firestore is down');
+            throw new Error('Unable to connect to the database. Please check your internet connection.');
+        } else if (error.message.includes('not authenticated')) {
+            console.error('❌ NOT AUTHENTICATED - User needs to log in');
+            throw new Error('Authentication required. Please log in again.');
+        }
+        
+        console.error('Full error object:', error);
+        throw new Error(`Failed to delete transaction: ${error.message}`);
     }
 };
 
@@ -147,6 +203,7 @@ export const getTransactionsByType = async (type) => {
             });
         });
         
+        console.log(`Retrieved ${transactions.length} ${type} transactions`);
         return transactions;
     } catch (error) {
         console.error('Error getting transactions by type:', error);
@@ -175,6 +232,7 @@ export const getTransactionsByCategory = async (category) => {
             });
         });
         
+        console.log(`Retrieved ${transactions.length} transactions for category: ${category}`);
         return transactions;
     } catch (error) {
         console.error('Error getting transactions by category:', error);
@@ -197,7 +255,7 @@ export const getBudgets = async () => {
         
         const budgets = {};
         if (querySnapshot.empty) {
-            console.log('No budgets found for user. Seeding default budgets...');
+            console.log('No budgets found for user. Returning empty object.');
             return {};
         }
 
@@ -205,6 +263,7 @@ export const getBudgets = async () => {
             budgets[doc.id] = doc.data().amount;
         });
         
+        console.log(`Retrieved ${Object.keys(budgets).length} budget categories`);
         return budgets;
     } catch (error) {
         console.error('Error getting budgets:', error);
@@ -219,10 +278,19 @@ export const getBudgets = async () => {
  */
 export const saveBudget = async (category, amount) => {
     try {
+        console.log('=== saveBudget called ===');
+        console.log('Category:', category);
+        console.log('Amount:', amount);
+        
         const userId = getUserId();
         const budgetRef = doc(db, 'users', userId, 'budgets', category);
         
-        await setDoc(budgetRef, { amount: amount });
+        await setDoc(budgetRef, { 
+            amount: amount,
+            updatedAt: Timestamp.now()
+        });
+        
+        console.log('✅ Budget saved successfully');
         return { id: category, amount: amount };
     } catch (error) {
         console.error('Error saving budget:', error);
@@ -235,6 +303,7 @@ export const saveBudget = async (category, amount) => {
  */
 export const seedDefaultBudgets = async () => {
     try {
+        console.log('=== seedDefaultBudgets called ===');
         const userId = getUserId();
         const budgetsRef = collection(db, 'users', userId, 'budgets');
         
@@ -242,14 +311,47 @@ export const seedDefaultBudgets = async () => {
 
         for (const [category, amount] of Object.entries(defaultBudgets)) {
             const docRef = doc(budgetsRef, category);
-            batch.set(docRef, { amount: amount });
+            batch.set(docRef, { 
+                amount: amount,
+                createdAt: Timestamp.now(),
+                updatedAt: Timestamp.now()
+            });
         }
         
         await batch.commit();
-        console.log('Default budgets seeded successfully.');
+        console.log('✅ Default budgets seeded successfully.');
         return defaultBudgets;
     } catch (error) {
         console.error('Error seeding default budgets:', error);
+        throw error;
+    }
+};
+
+/**
+ * Delete a budget category
+ * @param {string} category - The category ID to delete
+ */
+export const deleteBudget = async (category) => {
+    try {
+        console.log('=== deleteBudget called ===');
+        console.log('Category to delete:', category);
+        
+        const userId = getUserId();
+        const budgetRef = doc(db, 'users', userId, 'budgets', category);
+        
+        await deleteDoc(budgetRef);
+        
+        console.log('✅ Budget deleted successfully');
+        return category;
+    } catch (error) {
+        console.error('Error deleting budget:', error);
+        
+        if (error.code === 'permission-denied') {
+            throw new Error('Permission denied. You do not have permission to delete this budget.');
+        } else if (error.code === 'not-found') {
+            throw new Error('Budget category not found.');
+        }
+        
         throw error;
     }
 };
