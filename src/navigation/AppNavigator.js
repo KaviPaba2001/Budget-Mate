@@ -12,6 +12,7 @@ import AddTransactionScreen from '../screens/AddTransactionScreen';
 import BudgetScreen from '../screens/BudgetScreen';
 import CardsScreen from '../screens/CardsScreen';
 import DashboardScreen from '../screens/DashboardScreen';
+import EditProfileScreen from '../screens/EditProfileScreen';
 import ReportsScreen from '../screens/ReportsScreen';
 import ScanReceiptScreen from '../screens/ScanReceiptScreen';
 import SettingsScreen from '../screens/SettingsScreen';
@@ -66,6 +67,11 @@ function SettingsStack({ onLogout }) {
             <Stack.Screen name="SettingsHome" options={{ title: "Settings" }}>
                 {props => <SettingsScreen {...props} onLogout={onLogout} />}
             </Stack.Screen>
+            <Stack.Screen 
+                name="EditProfile" 
+                component={EditProfileScreen} 
+                options={{ title: "Edit Profile" }} 
+            />
             <Stack.Screen name="About" component={AboutScreen} options={{ title: "About" }} />
         </Stack.Navigator>
     );

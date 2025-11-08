@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
 import { useState } from 'react';
 import {
     Alert,
@@ -17,12 +16,10 @@ import { useUser } from '../context/UserContext';
 import { theme } from '../styles/theme';
 
 export default function SettingsScreen({ navigation, onLogout }) {
-    const { userName, setUserName, profileImage, setProfileImage } = useUser();
+    const { userName, profileImage } = useUser();
     const [smsEnabled, setSmsEnabled] = useState(true);
     const [notificationsEnabled, setNotificationsEnabled] = useState(true);
     const [biometricEnabled, setBiometricEnabled] = useState(true);
-    const [isImageModalVisible, setImageModalVisible] = useState(false);
-    const [tempUserName, setTempUserName] = useState(userName || 'User');
     
     // Change PIN modal states
     const [isPinModalVisible, setPinModalVisible] = useState(false);
@@ -31,6 +28,17 @@ export default function SettingsScreen({ navigation, onLogout }) {
     const [confirmPin, setConfirmPin] = useState('');
 
     const settingSections = [
+        {
+            title: 'Profile',
+            items: [
+                { 
+                    icon: 'person', 
+                    title: 'Edit Profile', 
+                    type: 'navigation', 
+                    onPress: () => navigation.navigate('EditProfile') 
+                },
+            ],
+        },
         {
             title: 'Security',
             items: [
@@ -63,69 +71,13 @@ export default function SettingsScreen({ navigation, onLogout }) {
         },
     ];
 
-    const handleSaveName = () => {
-        setUserName(tempUserName);
-        Alert.alert("Success", "Your name has been updated.");
-    };
-
-    const handleChangeProfilePicture = () => {
-        Alert.alert(
-            "Change Profile Picture",
-            "Choose an option",
-            [
-                { text: "Take Photo...", onPress: takePhoto },
-                { text: "Choose from Gallery...", onPress: chooseFromGallery },
-                { text: "Cancel", style: "cancel" }
-            ]
-        );
-    };
-
-    const takePhoto = async () => {
-        const { status } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== 'granted') {
-            Alert.alert('Permission Denied', 'Camera access is required to take a photo.');
-            return;
-        }
-        let result = await ImagePicker.launchCameraAsync({
-            allowsEditing: true,
-            aspect: [1, 1],
-            quality: 1,
-        });
-        if (!result.canceled) {
-            setProfileImage(result.assets[0].uri);
-        }
-    };
-
-    const chooseFromGallery = async () => {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-            Alert.alert('Permission Denied', 'Gallery access is required to choose a photo.');
-            return;
-        }
-        let result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: true,
-            aspect: [1, 1],
-            quality: 1,
-        });
-        if (!result.canceled) {
-            setProfileImage(result.assets[0].uri);
-        }
-    };
-
-    // LOGOUT HANDLER
     const handleLogout = () => {
         console.log('=== LOGOUT BUTTON PRESSED ===');
-        console.log('onLogout prop exists:', !!onLogout);
-        console.log('onLogout is function:', typeof onLogout === 'function');
-        
         if (onLogout && typeof onLogout === 'function') {
             console.log('Calling onLogout function...');
             onLogout();
-            console.log('onLogout function called successfully');
         } else {
             console.error('ERROR: onLogout function not available');
-            console.error('onLogout value:', onLogout);
             Alert.alert('Error', 'Logout function is not available. Please restart the app.');
         }
     };
@@ -163,29 +115,26 @@ export default function SettingsScreen({ navigation, onLogout }) {
 
     return (
         <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-            <View style={styles.profileHeader}>
-                <TouchableOpacity onPress={() => profileImage && setImageModalVisible(true)}>
-                    <Image
-                        source={profileImage ? { uri: profileImage } : { uri: 'https://placehold.co/100x100/1f2937/f9fafb?text=U' }}
-                        style={styles.profileImage}
-                    />
-                    <TouchableOpacity style={styles.editIcon} onPress={handleChangeProfilePicture}>
-                        <Ionicons name="camera-outline" size={20} color={theme.colors.white} />
-                    </TouchableOpacity>
-                </TouchableOpacity>
+            {/* Profile Header */}
+            <TouchableOpacity 
+                style={styles.profileHeader}
+                onPress={() => navigation.navigate('EditProfile')}
+                activeOpacity={0.7}
+            >
+                <Image
+                    source={profileImage ? { uri: profileImage } : { uri: 'https://placehold.co/100x100/1f2937/f9fafb?text=U' }}
+                    style={styles.profileImage}
+                />
                 <View style={styles.profileInfo}>
-                    <TextInput 
-                        style={styles.profileNameInput}
-                        value={tempUserName}
-                        onChangeText={setTempUserName}
-                        onBlur={handleSaveName}
-                        placeholder="Enter your name"
-                        placeholderTextColor={theme.colors.text_secondary}
-                    />
-                    <Text style={styles.profileEmail}>Your personal account</Text>
+                    <Text style={styles.profileName}>{userName}</Text>
+                    <View style={styles.editProfileButton}>
+                        <Text style={styles.editProfileText}>Edit Profile</Text>
+                        <Ionicons name="chevron-forward" size={16} color={theme.colors.primary} />
+                    </View>
                 </View>
-            </View>
+            </TouchableOpacity>
 
+            {/* Settings Sections */}
             {settingSections.map((section, sectionIndex) => (
                 <View key={sectionIndex} style={styles.section}>
                     <Text style={styles.sectionTitle}>{section.title}</Text>
@@ -195,7 +144,7 @@ export default function SettingsScreen({ navigation, onLogout }) {
                 </View>
             ))}
 
-            {/* LOGOUT SECTION */}
+            {/* Logout Section */}
             <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Account</Text>
                 <View style={styles.sectionContent}>
@@ -215,24 +164,7 @@ export default function SettingsScreen({ navigation, onLogout }) {
                 </View>
             </View>
 
-            {/* IMAGE MODAL */}
-            <Modal
-                visible={isImageModalVisible}
-                transparent={true}
-                onRequestClose={() => setImageModalVisible(false)}
-            >
-                <View style={styles.imageModalContainer}>
-                    <Image source={{ uri: profileImage }} style={styles.fullScreenImage} />
-                    <TouchableOpacity
-                        style={styles.closeButton}
-                        onPress={() => setImageModalVisible(false)}
-                    >
-                        <Ionicons name="close" size={30} color="white" />
-                    </TouchableOpacity>
-                </View>
-            </Modal>
-
-            {/* CHANGE PIN MODAL */}
+            {/* Change PIN Modal */}
             <Modal
                 visible={isPinModalVisible}
                 animationType="slide"
@@ -312,39 +244,146 @@ export default function SettingsScreen({ navigation, onLogout }) {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: theme.colors.background },
-    profileHeader: { alignItems: 'center', padding: theme.spacing.lg, backgroundColor: theme.colors.surface, margin: theme.spacing.md, borderRadius: theme.borderRadius.lg },
-    profileImage: { width: 100, height: 100, borderRadius: 50, borderWidth: 3, borderColor: theme.colors.primary },
-    editIcon: { position: 'absolute', bottom: 0, right: 0, backgroundColor: theme.colors.primary, padding: 8, borderRadius: 20 },
-    profileInfo: { alignItems: 'center', marginTop: theme.spacing.md },
-    profileNameInput: { fontSize: theme.fontSize.xl, fontWeight: 'bold', color: theme.colors.text_primary, padding: theme.spacing.xs, textAlign: 'center', minWidth: 150 },
-    profileEmail: { fontSize: theme.fontSize.base, color: theme.colors.text_secondary, marginTop: theme.spacing.xs },
-    section: { marginTop: theme.spacing.sm, marginHorizontal: theme.spacing.md },
-    sectionTitle: { fontSize: theme.fontSize.sm, fontWeight: '600', color: theme.colors.text_secondary, marginBottom: theme.spacing.sm, textTransform: 'uppercase', letterSpacing: 0.5 },
-    sectionContent: { backgroundColor: theme.colors.surface, borderRadius: theme.borderRadius.lg, overflow: 'hidden' },
-    settingItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: theme.spacing.md, paddingVertical: theme.spacing.md, borderBottomWidth: 1, borderBottomColor: theme.colors.background },
-    lastItem: { borderBottomWidth: 0 },
-    settingIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: theme.colors.background, justifyContent: 'center', alignItems: 'center', marginRight: theme.spacing.md },
-    settingTitle: { flex: 1, fontSize: theme.fontSize.base, color: theme.colors.text_primary },
-    settingAction: { justifyContent: 'center' },
-    
-    // LOGOUT STYLES
-    logoutItem: { backgroundColor: 'rgba(239, 68, 68, 0.1)' },
-    logoutIcon: { backgroundColor: 'rgba(239, 68, 68, 0.2)' },
-    logoutText: { color: '#EF4444', fontWeight: '600' },
-    
-    // IMAGE MODAL
-    imageModalContainer: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.9)', justifyContent: 'center', alignItems: 'center' },
-    fullScreenImage: { width: '100%', height: '80%', resizeMode: 'contain' },
-    closeButton: { position: 'absolute', top: 60, right: 20, backgroundColor: 'rgba(0,0,0,0.5)', padding: 8, borderRadius: 20 },
-    
-    // CHANGE PIN MODAL
-    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-    pinModalContainer: { width: '100%', backgroundColor: theme.colors.surface, borderRadius: theme.borderRadius.lg, padding: theme.spacing.lg },
-    modalTitle: { fontSize: theme.fontSize.lg, fontWeight: 'bold', color: theme.colors.text_primary, marginBottom: theme.spacing.md, textAlign: 'center' },
-    modalInput: { backgroundColor: theme.colors.background, borderRadius: theme.borderRadius.md, padding: theme.spacing.md, marginBottom: theme.spacing.sm, color: theme.colors.text_primary },
-    modalButtonRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: theme.spacing.md },
-    modalButtonCancel: { backgroundColor: '#6B7280', paddingVertical: theme.spacing.sm, paddingHorizontal: theme.spacing.lg, borderRadius: theme.borderRadius.md },
-    modalButtonSave: { backgroundColor: theme.colors.primary, paddingVertical: theme.spacing.sm, paddingHorizontal: theme.spacing.lg, borderRadius: theme.borderRadius.md },
-    modalButtonText: { color: theme.colors.white, fontWeight: '600' },
-}); 
+    container: { 
+        flex: 1, 
+        backgroundColor: theme.colors.background 
+    },
+    profileHeader: { 
+        flexDirection: 'row',
+        alignItems: 'center', 
+        padding: theme.spacing.lg, 
+        backgroundColor: theme.colors.surface, 
+        margin: theme.spacing.md, 
+        borderRadius: theme.borderRadius.lg 
+    },
+    profileImage: { 
+        width: 80, 
+        height: 80, 
+        borderRadius: 40, 
+        borderWidth: 3, 
+        borderColor: theme.colors.primary 
+    },
+    profileInfo: { 
+        flex: 1,
+        marginLeft: theme.spacing.md 
+    },
+    profileName: { 
+        fontSize: theme.fontSize.xl, 
+        fontWeight: 'bold', 
+        color: theme.colors.text_primary,
+        marginBottom: theme.spacing.xs,
+    },
+    editProfileButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.spacing.xs,
+    },
+    editProfileText: {
+        fontSize: theme.fontSize.base,
+        color: theme.colors.primary,
+        fontWeight: '600',
+    },
+    section: { 
+        marginTop: theme.spacing.sm, 
+        marginHorizontal: theme.spacing.md 
+    },
+    sectionTitle: { 
+        fontSize: theme.fontSize.sm, 
+        fontWeight: '600', 
+        color: theme.colors.text_secondary, 
+        marginBottom: theme.spacing.sm, 
+        textTransform: 'uppercase', 
+        letterSpacing: 0.5 
+    },
+    sectionContent: { 
+        backgroundColor: theme.colors.surface, 
+        borderRadius: theme.borderRadius.lg, 
+        overflow: 'hidden' 
+    },
+    settingItem: { 
+        flexDirection: 'row', 
+        alignItems: 'center', 
+        paddingHorizontal: theme.spacing.md, 
+        paddingVertical: theme.spacing.md, 
+        borderBottomWidth: 1, 
+        borderBottomColor: theme.colors.background 
+    },
+    lastItem: { 
+        borderBottomWidth: 0 
+    },
+    settingIcon: { 
+        width: 40, 
+        height: 40, 
+        borderRadius: 20, 
+        backgroundColor: theme.colors.background, 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        marginRight: theme.spacing.md 
+    },
+    settingTitle: { 
+        flex: 1, 
+        fontSize: theme.fontSize.base, 
+        color: theme.colors.text_primary 
+    },
+    settingAction: { 
+        justifyContent: 'center' 
+    },
+    logoutItem: { 
+        backgroundColor: 'rgba(239, 68, 68, 0.1)' 
+    },
+    logoutIcon: { 
+        backgroundColor: 'rgba(239, 68, 68, 0.2)' 
+    },
+    logoutText: { 
+        color: '#EF4444', 
+        fontWeight: '600' 
+    },
+    modalOverlay: { 
+        flex: 1, 
+        backgroundColor: 'rgba(0,0,0,0.6)', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        padding: 20 
+    },
+    pinModalContainer: { 
+        width: '100%', 
+        backgroundColor: theme.colors.surface, 
+        borderRadius: theme.borderRadius.lg, 
+        padding: theme.spacing.lg 
+    },
+    modalTitle: { 
+        fontSize: theme.fontSize.lg, 
+        fontWeight: 'bold', 
+        color: theme.colors.text_primary, 
+        marginBottom: theme.spacing.md, 
+        textAlign: 'center' 
+    },
+    modalInput: { 
+        backgroundColor: theme.colors.background, 
+        borderRadius: theme.borderRadius.md, 
+        padding: theme.spacing.md, 
+        marginBottom: theme.spacing.sm, 
+        color: theme.colors.text_primary 
+    },
+    modalButtonRow: { 
+        flexDirection: 'row', 
+        justifyContent: 'space-between', 
+        marginTop: theme.spacing.md 
+    },
+    modalButtonCancel: { 
+        backgroundColor: '#6B7280', 
+        paddingVertical: theme.spacing.sm, 
+        paddingHorizontal: theme.spacing.lg, 
+        borderRadius: theme.borderRadius.md 
+    },
+    modalButtonSave: { 
+        backgroundColor: theme.colors.primary, 
+        paddingVertical: theme.spacing.sm, 
+        paddingHorizontal: theme.spacing.lg, 
+        borderRadius: theme.borderRadius.md 
+    },
+    modalButtonText: { 
+        color: theme.colors.white, 
+        fontWeight: '600' 
+    },
+});

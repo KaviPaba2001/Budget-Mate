@@ -14,8 +14,7 @@ import {
 } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import BudgetCard from '../components/BudgetCard';
-// Import the new budget functions
-import { getBudgets, getTransactions, saveBudget, seedDefaultBudgets } from '../services/firebaseService';
+import { deleteBudget, getBudgets, getTransactions, saveBudget, seedDefaultBudgets } from '../services/firebaseService';
 import { theme } from '../styles/theme';
 
 // Animated component for staggered entry
@@ -38,14 +37,15 @@ const AnimatedView = ({ children, index }) => {
 
 export default function BudgetScreen() {
     const [modalVisible, setModalVisible] = useState(false);
+    const [editModalVisible, setEditModalVisible] = useState(false);
+    const [selectedBudget, setSelectedBudget] = useState(null);
     const [newBudgetCategory, setNewBudgetCategory] = useState("");
     const [newBudgetAmount, setNewBudgetAmount] = useState("");
+    const [editBudgetAmount, setEditBudgetAmount] = useState("");
     const [transactions, setTransactions] = useState([]);
     const [loading, setLoading] = useState(true);
-    // This will hold the budgets loaded from Firebase
     const [categoryBudgets, setCategoryBudgets] = useState({});
 
-    // Load transactions and budgets when screen comes into focus
     useFocusEffect(
         useCallback(() => {
             loadData();
@@ -55,11 +55,9 @@ export default function BudgetScreen() {
     const loadData = async () => {
         setLoading(true);
         try {
-            // Fetch both transactions and budgets
             const transactionData = await getTransactions();
             let budgetsData = await getBudgets();
 
-            // If no budgets, seed the default ones
             if (Object.keys(budgetsData).length === 0) {
                 budgetsData = await seedDefaultBudgets();
             }
@@ -75,7 +73,6 @@ export default function BudgetScreen() {
         }
     };
 
-    // Calculate spending by category for current month
     const calculateCategorySpending = () => {
         const now = new Date();
         const currentMonth = now.getMonth();
@@ -94,7 +91,6 @@ export default function BudgetScreen() {
                     transactionDate = new Date();
                 }
 
-                // Check if transaction is in current month
                 if (transactionDate.getMonth() === currentMonth && 
                     transactionDate.getFullYear() === currentYear) {
                     
@@ -114,27 +110,39 @@ export default function BudgetScreen() {
 
     const categorySpending = calculateCategorySpending();
 
-    // Create budgets array with actual spending
+    const categoryNames = {
+        'food': 'Food & Dining',
+        'transport': 'Transportation',
+        'utilities': 'Utilities',
+        'shopping': 'Shopping',
+        'entertainment': 'Entertainment',
+        'health': 'Healthcare',
+        'education': 'Education',
+        'salary': 'Salary',
+        'freelance': 'Freelance',
+        'business': 'Business',
+        'investment': 'Investment',
+        'gift': 'Gift',
+        'other': 'Other',
+    };
+
+    const categoryIcons = {
+        'food': 'restaurant',
+        'transport': 'car',
+        'utilities': 'flash',
+        'shopping': 'bag',
+        'entertainment': 'game-controller',
+        'health': 'medical',
+        'education': 'school',
+        'salary': 'briefcase',
+        'freelance': 'laptop',
+        'business': 'storefront',
+        'investment': 'trending-up',
+        'gift': 'gift',
+        'other': 'ellipsis-horizontal',
+    };
+
     const budgets = Object.keys(categoryBudgets).map(categoryKey => {
-        const categoryNames = {
-            'food': 'Food & Dining',
-            'transport': 'Transportation',
-            'utilities': 'Utilities',
-            'shopping': 'Shopping',
-            'entertainment': 'Entertainment',
-            'health': 'Healthcare',
-        };
-
-        const categoryIcons = {
-            'food': 'restaurant',
-            'transport': 'car',
-            'utilities': 'flash',
-            'shopping': 'bag',
-            'entertainment': 'game-controller',
-            'health': 'medical',
-        };
-
-        // Handle dynamically added categories
         const displayName = categoryNames[categoryKey] || categoryKey.charAt(0).toUpperCase() + categoryKey.slice(1);
 
         return {
@@ -150,39 +158,26 @@ export default function BudgetScreen() {
     const totalBudget = budgets.reduce((sum, budget) => sum + budget.budget, 0);
 
     const handleAddBudget = async () => {
-        console.log('Add Budget button pressed'); // Debug log
-        console.log('Category:', newBudgetCategory); // Debug log
-        console.log('Amount:', newBudgetAmount); // Debug log
-
-        // Trim whitespace from inputs
         const categoryInput = newBudgetCategory.trim();
         const amountInput = newBudgetAmount.trim();
 
-        // 1. Check if fields are empty
         if (!categoryInput || !amountInput) {
             Alert.alert('Error', 'Please fill in all fields');
             return;
         }
 
-        // 2. Try to convert amount to a number
         const amount = parseFloat(amountInput);
         
-        // 3. Validate the amount
         if (isNaN(amount) || amount <= 0) {
             Alert.alert('Error', 'Please enter a valid amount (numbers only)');
             return;
         }
 
-        // 4. Use the category name as the ID (lowercase)
         const categoryKey = categoryInput.toLowerCase();
 
         try {
-            console.log('Saving budget:', categoryKey, amount); // Debug log
-            
-            // Save to Firebase
             await saveBudget(categoryKey, amount);
             
-            // Update local state to reflect change instantly
             setCategoryBudgets(prev => ({
                 ...prev,
                 [categoryKey]: amount,
@@ -190,7 +185,6 @@ export default function BudgetScreen() {
 
             Alert.alert('Success', 'Budget category added successfully!');
             
-            // Close modal and reset fields
             setModalVisible(false);
             setNewBudgetCategory("");
             setNewBudgetAmount("");
@@ -199,6 +193,80 @@ export default function BudgetScreen() {
             console.error('Error saving budget:', error);
             Alert.alert('Error', 'Failed to save budget. Please try again.\n\n' + error.message);
         }
+    };
+
+    const handleBudgetPress = (budget) => {
+        setSelectedBudget(budget);
+        setEditBudgetAmount(budget.budget.toString());
+        setEditModalVisible(true);
+    };
+
+    const handleUpdateBudget = async () => {
+        const amountInput = editBudgetAmount.trim();
+
+        if (!amountInput) {
+            Alert.alert('Error', 'Please enter an amount');
+            return;
+        }
+
+        const amount = parseFloat(amountInput);
+        
+        if (isNaN(amount) || amount <= 0) {
+            Alert.alert('Error', 'Please enter a valid amount');
+            return;
+        }
+
+        try {
+            await saveBudget(selectedBudget.id, amount);
+            
+            setCategoryBudgets(prev => ({
+                ...prev,
+                [selectedBudget.id]: amount,
+            }));
+
+            Alert.alert('Success', 'Budget updated successfully!');
+            setEditModalVisible(false);
+            setSelectedBudget(null);
+            setEditBudgetAmount("");
+
+        } catch (error) {
+            console.error('Error updating budget:', error);
+            Alert.alert('Error', 'Failed to update budget. Please try again.');
+        }
+    };
+
+    const handleDeleteBudget = () => {
+        Alert.alert(
+            'Delete Budget',
+            `Are you sure you want to delete the budget for ${selectedBudget.category}?`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            await deleteBudget(selectedBudget.id);
+                            
+                            setCategoryBudgets(prev => {
+                                const newBudgets = { ...prev };
+                                delete newBudgets[selectedBudget.id];
+                                return newBudgets;
+                            });
+
+                            Alert.alert('Success', 'Budget deleted successfully!');
+                            setEditModalVisible(false);
+                            setSelectedBudget(null);
+                            setEditBudgetAmount("");
+
+                        } catch (error) {
+                            console.error('Error deleting budget:', error);
+                            Alert.alert('Error', 'Failed to delete budget. Please try again.');
+                        }
+                    },
+                },
+            ]
+        );
     };
 
     if (loading) {
@@ -213,7 +281,6 @@ export default function BudgetScreen() {
     return (
         <View style={styles.container}>
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContainer}>
-                {/* Overall Budget Summary */}
                 <AnimatedView index={0}>
                     <View style={styles.summaryCard}>
                         <Text style={styles.summaryTitle}>Monthly Budget Overview</Text>
@@ -242,17 +309,13 @@ export default function BudgetScreen() {
                     </View>
                 </AnimatedView>
 
-                {/* Budget Categories */}
                 <AnimatedView index={1}>
                     <View style={styles.section}>
                         <View style={styles.sectionHeader}>
                             <Text style={styles.sectionTitle}>Budget Categories</Text>
                             <TouchableOpacity
                                 style={styles.addButton}
-                                onPress={() => {
-                                    console.log('Opening modal...'); // Debug log
-                                    setModalVisible(true);
-                                }}
+                                onPress={() => setModalVisible(true)}
                             >
                                 <Ionicons name="add" size={20} color={theme.colors.primary} />
                                 <Text style={styles.addButtonText}>Add</Text>
@@ -260,7 +323,12 @@ export default function BudgetScreen() {
                         </View>
                         {budgets.length > 0 ? (
                             budgets.map((budget) => (
-                                <View key={budget.id} style={styles.budgetItem}>
+                                <TouchableOpacity
+                                    key={budget.id}
+                                    style={styles.budgetItem}
+                                    onPress={() => handleBudgetPress(budget)}
+                                    activeOpacity={0.7}
+                                >
                                     <View style={styles.budgetHeader}>
                                         <View style={styles.budgetIconContainer}>
                                             <Ionicons name={budget.icon} size={24} color={theme.colors.primary} />
@@ -271,6 +339,7 @@ export default function BudgetScreen() {
                                                 Rs. {budget.spent.toLocaleString()} / Rs. {budget.budget.toLocaleString()}
                                             </Text>
                                         </View>
+                                        <Ionicons name="chevron-forward" size={20} color={theme.colors.text_secondary} />
                                     </View>
                                     <BudgetCard
                                         spent={budget.spent}
@@ -278,7 +347,7 @@ export default function BudgetScreen() {
                                         showTitle={false}
                                         compact={true}
                                     />
-                                </View>
+                                </TouchableOpacity>
                             ))
                         ) : (
                             <View style={styles.emptyBudgets}>
@@ -298,10 +367,7 @@ export default function BudgetScreen() {
                 animationType="slide"
                 transparent={true}
                 visible={modalVisible}
-                onRequestClose={() => {
-                    console.log('Modal closing...'); // Debug log
-                    setModalVisible(false);
-                }}
+                onRequestClose={() => setModalVisible(false)}
             >
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
@@ -316,10 +382,7 @@ export default function BudgetScreen() {
                             <TextInput
                                 style={styles.modalInput}
                                 value={newBudgetCategory}
-                                onChangeText={(text) => {
-                                    console.log('Category input:', text); // Debug log
-                                    setNewBudgetCategory(text);
-                                }}
+                                onChangeText={setNewBudgetCategory}
                                 placeholder="e.g., Groceries, Gas, etc."
                                 placeholderTextColor={theme.colors.text_secondary}
                             />
@@ -327,10 +390,7 @@ export default function BudgetScreen() {
                             <TextInput
                                 style={styles.modalInput}
                                 value={newBudgetAmount}
-                                onChangeText={(text) => {
-                                    console.log('Amount input:', text); // Debug log
-                                    setNewBudgetAmount(text);
-                                }}
+                                onChangeText={setNewBudgetAmount}
                                 placeholder="5000"
                                 keyboardType="numeric"
                                 placeholderTextColor={theme.colors.text_secondary}
@@ -343,6 +403,57 @@ export default function BudgetScreen() {
                         >
                             <Text style={styles.saveButtonText}>Add Budget</Text>
                         </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Edit/Delete Budget Modal */}
+            <Modal
+                animationType="slide"
+                transparent={true}
+                visible={editModalVisible}
+                onRequestClose={() => setEditModalVisible(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Edit Budget</Text>
+                            <TouchableOpacity onPress={() => setEditModalVisible(false)}>
+                                <Ionicons name="close" size={24} color={theme.colors.text_secondary} />
+                            </TouchableOpacity>
+                        </View>
+                        {selectedBudget && (
+                            <View style={styles.modalBody}>
+                                <Text style={styles.inputLabel}>Category: {selectedBudget.category}</Text>
+                                <Text style={styles.inputLabel}>Budget Amount (Rs.)</Text>
+                                <TextInput
+                                    style={styles.modalInput}
+                                    value={editBudgetAmount}
+                                    onChangeText={setEditBudgetAmount}
+                                    placeholder="5000"
+                                    keyboardType="numeric"
+                                    placeholderTextColor={theme.colors.text_secondary}
+                                />
+                            </View>
+                        )}
+                        <View style={styles.editButtonContainer}>
+                            <TouchableOpacity 
+                                style={[styles.modalButton, styles.deleteButton]} 
+                                onPress={handleDeleteBudget}
+                                activeOpacity={0.7}
+                            >
+                                <Ionicons name="trash-outline" size={20} color={theme.colors.white} />
+                                <Text style={styles.modalButtonText}>Delete</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                style={[styles.modalButton, styles.updateButton]} 
+                                onPress={handleUpdateBudget}
+                                activeOpacity={0.7}
+                            >
+                                <Ionicons name="checkmark" size={20} color={theme.colors.white} />
+                                <Text style={styles.modalButtonText}>Update</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 </View>
             </Modal>
@@ -531,6 +642,30 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     saveButtonText: {
+        color: theme.colors.white,
+        fontSize: theme.fontSize.base,
+        fontWeight: 'bold',
+    },
+    editButtonContainer: {
+        flexDirection: 'row',
+        gap: theme.spacing.md,
+    },
+    modalButton: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: theme.spacing.md,
+        borderRadius: theme.borderRadius.lg,
+        gap: theme.spacing.xs,
+    },
+    deleteButton: {
+        backgroundColor: theme.colors.danger,
+    },
+    updateButton: {
+        backgroundColor: theme.colors.primary,
+    },
+    modalButtonText: {
         color: theme.colors.white,
         fontSize: theme.fontSize.base,
         fontWeight: 'bold',
