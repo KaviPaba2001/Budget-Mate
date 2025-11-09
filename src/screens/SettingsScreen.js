@@ -29,17 +29,6 @@ export default function SettingsScreen({ navigation, onLogout }) {
 
     const settingSections = [
         {
-            title: 'Profile',
-            items: [
-                { 
-                    icon: 'person', 
-                    title: 'Edit Profile', 
-                    type: 'navigation', 
-                    onPress: () => navigation.navigate('EditProfile') 
-                },
-            ],
-        },
-        {
             title: 'Security',
             items: [
                 { icon: 'finger-print', title: 'Biometric Login', type: 'switch', value: biometricEnabled, onToggle: setBiometricEnabled },

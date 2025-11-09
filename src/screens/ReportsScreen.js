@@ -2,9 +2,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { BarChart, PieChart } from 'react-native-gifted-charts';
+import { PieChart } from 'react-native-gifted-charts';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import { getTransactions } from '../services/firebaseService';
+// Assuming you have this file for custom styles
 import { theme } from '../styles/theme';
 
 // Animated component for staggered entry
@@ -40,7 +41,9 @@ export default function ReportsScreen() {
     const loadTransactions = async () => {
         setLoading(true);
         try {
-            const data = await getTransactions();
+            // Replace with your actual transaction loading logic
+            // This assumes getTransactions() returns an array of transaction objects
+            const data = await getTransactions(); 
             setTransactions(data);
         } catch (error) {
             console.error('Error loading transactions:', error);
@@ -59,15 +62,19 @@ export default function ReportsScreen() {
             } else if (transaction.createdAt?.toDate) {
                 transactionDate = transaction.createdAt.toDate();
             } else {
-                transactionDate = new Date();
+                // Fallback for transactions without valid date/createdAt
+                return false; 
             }
 
             if (selectedPeriod === 'week') {
                 const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                // Reset time components for accurate comparison on the day level
+                weekAgo.setHours(0, 0, 0, 0);
+                transactionDate.setHours(0, 0, 0, 0);
                 return transactionDate >= weekAgo;
             } else if (selectedPeriod === 'month') {
                 return transactionDate.getMonth() === now.getMonth() && 
-                       transactionDate.getFullYear() === now.getFullYear();
+                        transactionDate.getFullYear() === now.getFullYear();
             } else if (selectedPeriod === 'year') {
                 return transactionDate.getFullYear() === now.getFullYear();
             }
@@ -98,7 +105,7 @@ export default function ReportsScreen() {
             return acc;
         }, {});
 
-    // Colors for pie chart
+    // Colors for pie charts
     const categoryColors = {
         food: '#10b981',
         transport: '#f59e0b',
@@ -111,28 +118,37 @@ export default function ReportsScreen() {
     };
 
     // Data for Pie Chart (Spending by Category)
-    const pieData = Object.entries(expensesByCategory)
-        .map(([category, amount]) => ({
-            value: amount,
-            label: category.charAt(0).toUpperCase() + category.slice(1),
-            color: categoryColors[category] || '#6b7280',
-        }))
+    const expensePieData = Object.entries(expensesByCategory)
+        .map(([category, amount]) => {
+            const percentage = totalExpense > 0 ? ((amount / totalExpense) * 100).toFixed(1) : 0;
+            return {
+                value: amount,
+                label: category.charAt(0).toUpperCase() + category.slice(1),
+                color: categoryColors[category] || '#6b7280',
+                percentage: percentage,
+                text: `${percentage}%`, 
+            };
+        })
         .sort((a, b) => b.value - a.value);
 
-    // Data for Bar Chart (Income vs Expense)
-    const barData = [
-        { 
-            value: totalIncome, 
-            label: 'Income', 
-            frontColor: theme.colors.success,
-            spacing: 10,
+    // Data for Income vs Expense Pie Chart
+    const incomeExpensePieData = [
+        {
+            value: totalIncome,
+            label: 'Income',
+            color: theme.colors.success,
+            percentage: totalIncome + totalExpense > 0 ? ((totalIncome / (totalIncome + totalExpense)) * 100).toFixed(1) : 0,
         },
-        { 
-            value: totalExpense, 
-            label: 'Expense', 
-            frontColor: theme.colors.danger,
+        {
+            value: totalExpense,
+            label: 'Expense',
+            color: theme.colors.danger,
+            percentage: totalIncome + totalExpense > 0 ? ((totalExpense / (totalIncome + totalExpense)) * 100).toFixed(1) : 0,
         },
-    ];
+    ].map(item => ({
+        ...item,
+        text: `${item.percentage}%`, 
+    }));
 
     // Calculate savings
     const savings = totalIncome - totalExpense;
@@ -168,6 +184,12 @@ export default function ReportsScreen() {
                 <Text style={styles.emptyText}>
                     Add some transactions to see your financial reports
                 </Text>
+                <TouchableOpacity 
+                    style={styles.loadButton} 
+                    onPress={loadTransactions}
+                >
+                    <Text style={styles.loadButtonText}>Try Reloading</Text>
+                </TouchableOpacity>
             </View>
         );
     }
@@ -249,36 +271,40 @@ export default function ReportsScreen() {
                 </View>
             </AnimatedView>
 
-            {/* Spending by Category Pie Chart */}
-            {pieData.length > 0 && (
+            {/* Income vs Expense Pie Chart */}
+            {(totalIncome > 0 || totalExpense > 0) && (
                 <AnimatedView index={4}>
                     <View style={styles.chartContainer}>
-                        <Text style={styles.chartTitle}>Spending by Category</Text>
+                        <Text style={styles.chartTitle}>Income vs Expenses</Text>
                         <View style={styles.pieChartWrapper}>
                             <PieChart
-                                data={pieData}
+                                data={incomeExpensePieData}
                                 donut
                                 showText
-                                textColor={theme.colors.text_primary}
+                                textColor={theme.colors.white}
+                                textSize={14}
+                                textBackgroundRadius={20}
                                 radius={100}
                                 innerRadius={60}
-                                textSize={12}
                                 focusOnPress
+                                inwardExtraSpace={-10}
                                 centerLabelComponent={() => (
-                                    <View style={{justifyContent: 'center', alignItems: 'center'}}>
+                                    <View style={{justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.surface, borderRadius: 60, width: 120, height: 120}}>
                                         <Text style={{ fontSize: 18, color: theme.colors.text_primary, fontWeight: 'bold' }}>
-                                            {totalExpense.toLocaleString()}
+                                            Rs. {(totalIncome + totalExpense).toLocaleString()}
                                         </Text>
-                                        <Text style={{ fontSize: 12, color: theme.colors.text_secondary }}>Total</Text>
+                                        <Text style={{ fontSize: 12, color: theme.colors.text_secondary }}>Total
+                                        </Text>
                                     </View>
                                 )}
                             />
                         </View>
                         <View style={styles.legendContainer}>
-                            {pieData.map(item => (
+                            {incomeExpensePieData.map(item => (
                                 <View key={item.label} style={styles.legendItem}>
                                     <View style={[styles.legendColor, { backgroundColor: item.color }]} />
                                     <Text style={styles.legendText}>{item.label}</Text>
+                                    <Text style={styles.legendPercentage}>{item.percentage}%</Text>
                                     <Text style={styles.legendAmount}>Rs. {item.value.toLocaleString()}</Text>
                                 </View>
                             ))}
@@ -286,29 +312,48 @@ export default function ReportsScreen() {
                     </View>
                 </AnimatedView>
             )}
-            
-            {/* Income vs Expense Bar Chart */}
-            <AnimatedView index={5}>
-                <View style={styles.chartContainer}>
-                    <Text style={styles.chartTitle}>Income vs Expenses</Text>
-                    <View style={styles.barChartWrapper}>
-                        <BarChart
-                            data={barData}
-                            barWidth={80}
-                            initialSpacing={40}
-                            spacing={60}
-                            barBorderRadius={8}
-                            yAxisTextStyle={{ color: theme.colors.text_secondary, fontSize: 12 }}
-                            xAxisLabelTextStyle={{ color: theme.colors.text_secondary, fontSize: 14 }}
-                            yAxisThickness={0}
-                            xAxisThickness={0}
-                            isAnimated
-                            noOfSections={4}
-                            maxValue={Math.max(totalIncome, totalExpense) * 1.2}
-                        />
+
+            {/* Spending by Category Pie Chart */}
+            {expensePieData.length > 0 && (
+                <AnimatedView index={5}>
+                    <View style={styles.chartContainer}>
+                        <Text style={styles.chartTitle}>Spending by Category</Text>
+                        <View style={styles.pieChartWrapper}>
+                            <PieChart
+                                data={expensePieData}
+                                donut
+                                showText
+                                textColor={theme.colors.white}
+                                textSize={14}
+                                textBackgroundRadius={20}
+                                radius={100}
+                                innerRadius={60}
+                                focusOnPress
+                                inwardExtraSpace={-10}
+                                centerLabelComponent={() => (
+                                    <View style={{justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.surface, borderRadius: 60, width: 120, height: 120}}>
+                                        <Text style={{ fontSize: 18, color: theme.colors.text_primary, fontWeight: 'bold' }}>
+                                            Rs. {totalExpense.toLocaleString()}
+                                        </Text>
+                                        <Text style={{ fontSize: 12, color: theme.colors.text_secondary }}>Total
+                                        </Text>
+                                    </View>
+                                )}
+                            />
+                        </View>
+                        <View style={styles.legendContainer}>
+                            {expensePieData.map(item => (
+                                <View key={item.label} style={styles.legendItem}>
+                                    <View style={[styles.legendColor, { backgroundColor: item.color }]} />
+                                    <Text style={styles.legendText}>{item.label}</Text>
+                                    <Text style={styles.legendPercentage}>{item.percentage}%</Text>
+                                    <Text style={styles.legendAmount}>Rs. {item.value.toLocaleString()}</Text>
+                                </View>
+                            ))}
+                        </View>
                     </View>
-                </View>
-            </AnimatedView>
+                </AnimatedView>
+            )}
 
             {/* Top Spending Categories */}
             {topCategories.length > 0 && (
@@ -366,7 +411,7 @@ export default function ReportsScreen() {
                         <View style={styles.statBox}>
                             <Ionicons name="analytics-outline" size={24} color={theme.colors.secondary} />
                             <Text style={styles.statValue}>
-                                Rs. {totalExpense > 0 ? (totalExpense / filteredTransactions.filter(t => t.type === 'expense').length).toFixed(0) : 0}
+                                Rs. {filteredTransactions.filter(t => t.type === 'expense').length > 0 ? (totalExpense / filteredTransactions.filter(t => t.type === 'expense').length).toFixed(0) : 0}
                             </Text>
                             <Text style={styles.statLabel}>Avg Expense</Text>
                         </View>
@@ -377,6 +422,7 @@ export default function ReportsScreen() {
     );
 }
 
+// Assuming the 'theme' object is defined elsewhere and contains these color/style properties.
 const styles = StyleSheet.create({
     container: {
         flex: 1,
@@ -391,6 +437,17 @@ const styles = StyleSheet.create({
         marginTop: theme.spacing.md,
         fontSize: theme.fontSize.base,
         color: theme.colors.text_secondary,
+    },
+    loadButton: {
+        marginTop: theme.spacing.lg,
+        paddingHorizontal: theme.spacing.xl,
+        paddingVertical: theme.spacing.sm,
+        backgroundColor: theme.colors.primary,
+        borderRadius: theme.borderRadius.full,
+    },
+    loadButtonText: {
+        color: theme.colors.white,
+        fontWeight: 'bold',
     },
     header: {
         padding: theme.spacing.md,
@@ -516,10 +573,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginVertical: theme.spacing.md,
     },
-    barChartWrapper: {
-        alignItems: 'center',
-        marginVertical: theme.spacing.sm,
-    },
     legendContainer: {
         marginTop: theme.spacing.lg,
     },
@@ -538,6 +591,12 @@ const styles = StyleSheet.create({
         flex: 1,
         color: theme.colors.text_primary,
         fontSize: 14,
+    },
+    legendPercentage: {
+        color: theme.colors.primary,
+        fontSize: 14,
+        fontWeight: 'bold',
+        marginRight: theme.spacing.sm,
     },
     legendAmount: {
         color: theme.colors.text_secondary,

@@ -11,7 +11,8 @@ import {
     View,
 } from 'react-native';
 import CategoryPicker from '../components/CategoryPicker';
-import { addTransaction } from '../services/firebaseService';
+import { addTransaction, getBudgets, getTransactions } from '../services/firebaseService';
+import { checkBudgetAndNotify } from '../services/notificationService';
 import { theme } from '../styles/theme';
 
 export default function AddTransactionScreen({ navigation, route }) {
@@ -62,6 +63,22 @@ export default function AddTransactionScreen({ navigation, route }) {
             // Save to Firebase
             await addTransaction(transactionData);
 
+            // If it's an expense, check budget and send notifications
+            if (type === 'expense') {
+                try {
+                    const [transactions, budgets] = await Promise.all([
+                        getTransactions(),
+                        getBudgets()
+                    ]);
+                    
+                    // Check budget and send notifications
+                    await checkBudgetAndNotify(transactions, budgets);
+                } catch (notifError) {
+                    console.error('Error checking budget notifications:', notifError);
+                    // Don't block the user if notification fails
+                }
+            }
+
             Alert.alert(
                 'Success',
                 'Transaction saved successfully!',
@@ -69,7 +86,6 @@ export default function AddTransactionScreen({ navigation, route }) {
                     { 
                         text: 'OK', 
                         onPress: () => {
-                            // Navigate back and refresh the transactions list
                             navigation.navigate('TransactionsList', { refresh: true });
                         }
                     }
