@@ -16,7 +16,6 @@ import AnimatedPressable from '../components/AnimatedPressable';
 import AnimatedView from '../components/AnimatedView';
 import BudgetCard from '../components/BudgetCard';
 import { useUser } from '../context/UserContext';
-// Import the new budget functions
 import { getBudgets, getTransactions, seedDefaultBudgets } from '../services/firebaseService';
 import { theme } from '../styles/theme';
 
@@ -27,33 +26,25 @@ export default function DashboardScreen({ navigation }) {
     const [currentBalance, setCurrentBalance] = useState(0);
     const [monthlySpending, setMonthlySpending] = useState(0);
     const [monthlyIncome, setMonthlyIncome] = useState(0);
-
-    // This is now loaded from Firebase
     const [monthlyBudget, setMonthlyBudget] = useState(0);
 
-    // Load transactions when screen comes into focus
     useFocusEffect(
         useCallback(() => {
             loadData();
         }, [])
     );
 
-    // Renamed from loadTransactions to loadData
     const loadData = async () => {
         setLoading(true);
         try {
-            // Get transactions and calculate financials
             const data = await getTransactions();
             setTransactions(data);
             calculateFinancials(data);
 
-            // Get budgets and calculate total
             let budgetsData = await getBudgets();
             if (Object.keys(budgetsData).length === 0) {
-                // If no budgets exist, seed them
                 budgetsData = await seedDefaultBudgets();
             }
-            // Calculate total budget from all categories
             const total = Object.values(budgetsData).reduce((sum, amount) => sum + amount, 0);
             setMonthlyBudget(total);
 
@@ -65,7 +56,6 @@ export default function DashboardScreen({ navigation }) {
     };
 
     const calculateFinancials = (data) => {
-        // Get current month and year
         const now = new Date();
         const currentMonth = now.getMonth();
         const currentYear = now.getFullYear();
@@ -76,11 +66,8 @@ export default function DashboardScreen({ navigation }) {
 
         data.forEach(transaction => {
             const amount = transaction.amount || 0;
-            
-            // Calculate total balance
             totalBalance += amount;
 
-            // Get transaction date
             let transactionDate;
             if (transaction.date) {
                 transactionDate = new Date(transaction.date);
@@ -90,7 +77,6 @@ export default function DashboardScreen({ navigation }) {
                 transactionDate = new Date();
             }
 
-            // Check if transaction is in current month
             if (transactionDate.getMonth() === currentMonth && 
                 transactionDate.getFullYear() === currentYear) {
                 
@@ -116,7 +102,6 @@ export default function DashboardScreen({ navigation }) {
         return `${year}-${month}-${day}`;
     };
 
-    // Get recent transactions (last 4)
     const recentTransactions = transactions
         .sort((a, b) => {
             const dateA = a.date ? new Date(a.date) : (a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0));
@@ -135,7 +120,6 @@ export default function DashboardScreen({ navigation }) {
     const quickActions = [
         { icon: 'add-circle', title: 'Add', action: () => navigation.navigate('Transactions', { screen: 'AddTransaction' }) },
         { icon: 'camera', title: 'Scan', action: () => navigation.navigate('Transactions', { screen: 'ScanReceipt' }) },
-        { icon: 'card', title: 'Cards', action: () => navigation.navigate('CardsStack') },
         { icon: 'analytics', title: 'Reports', action: () => navigation.navigate('Reports') },
     ];
 
@@ -177,7 +161,6 @@ export default function DashboardScreen({ navigation }) {
                     <Text style={styles.balanceLabel}>Current Balance</Text>
                     <Text style={[
                         styles.balanceAmount,
-                        // This fix is still applied
                         { color: currentBalance >= 0 ? theme.colors.white : theme.colors.danger }
                     ]}>
                         Rs. {currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -224,7 +207,6 @@ export default function DashboardScreen({ navigation }) {
                     <Text style={styles.sectionTitle}>This Month's Budget</Text>
                     <BudgetCard
                         spent={monthlySpending}
-                        // Use the total budget from state (loaded from Firebase)
                         budget={monthlyBudget}
                     />
                 </View>

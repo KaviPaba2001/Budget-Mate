@@ -5,12 +5,10 @@ import * as Haptics from 'expo-haptics';
 import { Text } from 'react-native';
 import { theme } from '../styles/theme';
 
-// Import all screens
+// Import screens - Cards screens removed
 import AboutScreen from '../screens/AboutScreen';
-import AddCardScreen from '../screens/AddCardScreen';
 import AddTransactionScreen from '../screens/AddTransactionScreen';
 import BudgetScreen from '../screens/BudgetScreen';
-import CardsScreen from '../screens/CardsScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import EditProfileScreen from '../screens/EditProfileScreen';
 import ReportsScreen from '../screens/ReportsScreen';
@@ -41,21 +39,11 @@ function TransactionsStack() {
     );
 }
 
-function CardsStack() {
-    return (
-        <Stack.Navigator screenOptions={{ ...darkHeaderOptions, ...screenTransitionOptions }}>
-            <Stack.Screen name="CardsList" component={CardsScreen} options={{ title: "My Cards" }}/>
-            <Stack.Screen name="AddCard" component={AddCardScreen} options={{ title: 'Add New Card' }} />
-        </Stack.Navigator>
-    );
-}
-
 function DashboardStack() {
     return (
         <Stack.Navigator screenOptions={{ ...darkHeaderOptions, ...screenTransitionOptions }}>
             <Stack.Screen name="DashboardHome" component={DashboardScreen} options={{ headerShown: false }} />
             <Stack.Screen name="Reports" component={ReportsScreen} options={{ title: "Reports" }} />
-            <Stack.Screen name="CardsStack" component={CardsStack} options={{ headerShown: false }} />
         </Stack.Navigator>
     );
 }
