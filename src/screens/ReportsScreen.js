@@ -1,4 +1,4 @@
-// WeeklyReportScreen.js - Complete Enhanced Version
+// ReportsScreen.js - Enhanced Version with Weekly & Monthly Reports
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -23,10 +23,11 @@ import Animated, {
 import { auth, db } from '../../firebase';
 import { theme } from '../styles/theme';
 
-// Cache key for weekly report data
+// Cache keys
 const WEEKLY_REPORT_CACHE_KEY = 'weekly_report_cache';
+const MONTHLY_REPORT_CACHE_KEY = 'monthly_report_cache';
 
-// Category configuration with colors and icons
+// Category configuration
 const CATEGORY_CONFIG = {
     food: { name: 'Food & Dining', icon: 'restaurant', color: '#10b981' },
     transport: { name: 'Transportation', icon: 'car', color: '#f59e0b' },
@@ -39,32 +40,39 @@ const CATEGORY_CONFIG = {
 };
 
 /**
- * FIX: Enhanced function to get ISO week boundaries (Monday to Sunday)
- * Ensures accurate date boundary setting to avoid missing transactions.
- * @param {number} weekOffset - Offset from current week (0 for current, -1 for previous).
- * @returns {{start: Date, end: Date}} The start (Monday 00:00:00.000) and end (Sunday 23:59:59.999) dates.
+ * Get ISO week boundaries (Monday to Sunday)
  */
 const getISOWeekBounds = (weekOffset = 0) => {
     const now = new Date();
-    const dayOfWeek = now.getDay(); // 0 (Sunday) to 6 (Saturday)
-    // Calculate difference to Monday (1)
+    const dayOfWeek = now.getDay();
     let diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-    
-    // Apply week offset
     diffToMonday += (weekOffset * 7);
     
     const monday = new Date(now);
     monday.setDate(now.getDate() + diffToMonday);
-    // Set time to the very start of Monday
     monday.setHours(0, 0, 0, 0);
     
     const sunday = new Date(monday);
-    // Calculate 6 days forward
     sunday.setDate(monday.getDate() + 6);
-    // Set time to the very end of Sunday (crucial for Firestore '<=' query)
     sunday.setHours(23, 59, 59, 999);
     
     return { start: monday, end: sunday };
+};
+
+/**
+ * Get month boundaries (1st to last day)
+ */
+const getMonthBounds = (monthOffset = 0) => {
+    const now = new Date();
+    const targetDate = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
+    
+    const firstDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1);
+    firstDay.setHours(0, 0, 0, 0);
+    
+    const lastDay = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0);
+    lastDay.setHours(23, 59, 59, 999);
+    
+    return { start: firstDay, end: lastDay };
 };
 
 // Format date range for display
@@ -73,8 +81,13 @@ const formatWeekRange = (start, end) => {
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         return `${months[date.getMonth()]} ${date.getDate()}`;
     };
-    
     return `${formatDate(start)} – ${formatDate(end)}, ${start.getFullYear()}`;
+};
+
+const formatMonthRange = (start) => {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 
+                    'July', 'August', 'September', 'October', 'November', 'December'];
+    return `${months[start.getMonth()]} ${start.getFullYear()}`;
 };
 
 // Animated Card Component
@@ -89,28 +102,32 @@ const AnimatedCard = ({ children, delay = 0, style }) => {
     );
 };
 
-export default function WeeklyReportScreen({ navigation }) {
-    const [weekOffset, setWeekOffset] = useState(0);
+export default function ReportsScreen({ navigation }) {
+    const [viewMode, setViewMode] = useState('weekly'); // 'weekly' or 'monthly'
+    const [timeOffset, setTimeOffset] = useState(0);
     const [loading, setLoading] = useState(true);
     const [transactions, setTransactions] = useState([]);
     const [selectedCategory, setSelectedCategory] = useState(null);
     
-    // Load transactions for selected week
+    // Load transactions when view mode or offset changes
     useEffect(() => {
-        loadWeeklyData();
-    }, [weekOffset]);
+        loadData();
+    }, [timeOffset, viewMode]);
 
-    const loadWeeklyData = async () => {
+    const loadData = async () => {
         setLoading(true);
         try {
-            const { start, end } = getISOWeekBounds(weekOffset);
+            const bounds = viewMode === 'weekly' 
+                ? getISOWeekBounds(timeOffset) 
+                : getMonthBounds(timeOffset);
             
-            // Try to load from cache first
-            const cacheKey = `${WEEKLY_REPORT_CACHE_KEY}_${start.getTime()}`;
+            const { start, end } = bounds;
+            
+            // Try cache first for current period
+            const cacheKey = `${viewMode === 'weekly' ? WEEKLY_REPORT_CACHE_KEY : MONTHLY_REPORT_CACHE_KEY}_${start.getTime()}`;
             const cachedData = await AsyncStorage.getItem(cacheKey);
             
-            if (cachedData && weekOffset === 0) {
-                // Use cached data for current week
+            if (cachedData && timeOffset === 0) {
                 setTransactions(JSON.parse(cachedData));
                 setLoading(false);
                 return;
@@ -123,7 +140,6 @@ export default function WeeklyReportScreen({ navigation }) {
             const transactionsRef = collection(db, 'users', userId, 'transactions');
             const q = query(
                 transactionsRef,
-                // Ensure field is 'createdAt' which is the Timestamp
                 where('createdAt', '>=', Timestamp.fromDate(start)),
                 where('createdAt', '<=', Timestamp.fromDate(end))
             );
@@ -136,21 +152,20 @@ export default function WeeklyReportScreen({ navigation }) {
                 txnData.push({
                     id: doc.id,
                     ...data,
-                    // Convert Firestore Timestamp back to Date for local use
                     date: data.createdAt?.toDate?.() || new Date(data.date),
                 });
             });
             
             setTransactions(txnData);
             
-            // Cache current week data
-            if (weekOffset === 0) {
+            // Cache current period data
+            if (timeOffset === 0) {
                 await AsyncStorage.setItem(cacheKey, JSON.stringify(txnData));
             }
             
         } catch (error) {
-            console.error('Error loading weekly data:', error);
-            Alert.alert('Error', 'Failed to load weekly report');
+            console.error('Error loading data:', error);
+            Alert.alert('Error', 'Failed to load report data');
         } finally {
             setLoading(false);
         }
@@ -168,24 +183,16 @@ export default function WeeklyReportScreen({ navigation }) {
         
         const balance = income - expenses;
         
-        // Previous week comparison (Placeholders, as actual fetch is omitted here)
-        const prevIncome = 0;
-        const prevExpenses = 0;
-        
-        const incomeChange = prevIncome > 0 ? ((income - prevIncome) / prevIncome * 100) : 0;
-        const expenseChange = prevExpenses > 0 ? ((expenses - prevExpenses) / prevExpenses * 100) : 0;
-        const balanceChange = 0; 
-        
         return {
             income,
             expenses,
             balance,
-            incomeChange,
-            expenseChange,
-            balanceChange,
-            budget: 40000, // This should come from user settings
+            incomeChange: 0, // Simplified for now
+            expenseChange: 0,
+            balanceChange: 0,
+            budget: 40000,
         };
-    }, [transactions, weekOffset]);
+    }, [transactions]);
 
     // Category breakdown
     const categoryData = useMemo(() => {
@@ -222,75 +229,119 @@ export default function WeeklyReportScreen({ navigation }) {
             .sort((a, b) => b.amount - a.amount);
     }, [transactions, metrics.expenses]);
 
-    // Top 3 categories
     const topCategories = categoryData.slice(0, 3);
 
-    // Daily spending data for bar chart
-    const dailySpending = useMemo(() => {
-        const { start } = getISOWeekBounds(weekOffset);
-        const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-        
-        return days.map((day, index) => {
-            const dayDate = new Date(start);
-            dayDate.setDate(start.getDate() + index);
+    // Daily/Weekly spending data for bar chart
+    const chartData = useMemo(() => {
+        if (viewMode === 'weekly') {
+            const { start } = getISOWeekBounds(timeOffset);
+            const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
             
-            const dayTotal = transactions
-                .filter(t => {
-                    const txnDate = new Date(t.date);
-                    return t.type === 'expense' &&
-                            txnDate.getDate() === dayDate.getDate() &&
-                            txnDate.getMonth() === dayDate.getMonth() &&
-                            txnDate.getFullYear() === dayDate.getFullYear(); // Added Year check for robustness
-                })
-                .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+            return days.map((day, index) => {
+                const dayDate = new Date(start);
+                dayDate.setDate(start.getDate() + index);
+                
+                const dayTotal = transactions
+                    .filter(t => {
+                        const txnDate = new Date(t.date);
+                        return t.type === 'expense' &&
+                                txnDate.getDate() === dayDate.getDate() &&
+                                txnDate.getMonth() === dayDate.getMonth() &&
+                                txnDate.getFullYear() === dayDate.getFullYear();
+                    })
+                    .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+                
+                return {
+                    value: dayTotal,
+                    label: day,
+                    frontColor: dayTotal === 0 ? '#374151' : dayTotal > (metrics.budget / 7) ? '#ef4444' : '#10b981',
+                    spacing: 2,
+                    topLabelComponent: () => (
+                        dayTotal > 0 ? (
+                            <Text style={styles.barTopLabel}>
+                                {dayTotal >= 1000 ? `${(dayTotal / 1000).toFixed(1)}k` : dayTotal.toFixed(0)}
+                            </Text>
+                        ) : null
+                    ),
+                };
+            });
+        } else {
+            // Monthly view - show weeks
+            const { start, end } = getMonthBounds(timeOffset);
+            const weeks = [];
+            const weekLabels = ['W1', 'W2', 'W3', 'W4', 'W5'];
             
-            return {
-                value: dayTotal,
-                label: day,
-                frontColor: dayTotal === 0 ? '#374151' : dayTotal > (metrics.budget / 7) ? '#ef4444' : '#10b981',
-                spacing: 2,
-                topLabelComponent: () => (
-                    dayTotal > 0 ? (
-                        <Text style={styles.barTopLabel}>
-                            {dayTotal >= 1000 ? `${(dayTotal / 1000).toFixed(1)}k` : dayTotal.toFixed(0)}
-                        </Text>
-                    ) : null
-                ),
-            };
-        });
-    }, [transactions, weekOffset, metrics.budget]);
+            let currentWeekStart = new Date(start);
+            let weekIndex = 0;
+            
+            while (currentWeekStart <= end && weekIndex < 5) {
+                const weekEnd = new Date(currentWeekStart);
+                weekEnd.setDate(weekEnd.getDate() + 6);
+                
+                const weekTotal = transactions
+                    .filter(t => {
+                        const txnDate = new Date(t.date);
+                        return t.type === 'expense' &&
+                                txnDate >= currentWeekStart &&
+                                txnDate <= weekEnd;
+                    })
+                    .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+                
+                weeks.push({
+                    value: weekTotal,
+                    label: weekLabels[weekIndex],
+                    frontColor: weekTotal === 0 ? '#374151' : weekTotal > (metrics.budget / 4) ? '#ef4444' : '#10b981',
+                    spacing: 4,
+                    topLabelComponent: () => (
+                        weekTotal > 0 ? (
+                            <Text style={styles.barTopLabel}>
+                                {weekTotal >= 1000 ? `${(weekTotal / 1000).toFixed(1)}k` : weekTotal.toFixed(0)}
+                            </Text>
+                        ) : null
+                    ),
+                });
+                
+                currentWeekStart.setDate(currentWeekStart.getDate() + 7);
+                weekIndex++;
+            }
+            
+            return weeks;
+        }
+    }, [transactions, timeOffset, viewMode, metrics.budget]);
 
-    // Generate smart insights
+    // Generate insights
     const insights = useMemo(() => {
         const tips = [];
         
-        // Budget adherence
-        const daysUnderBudget = dailySpending.filter(d => 
-            d.value <= (metrics.budget / 7)
-        ).length;
-        
-        if (daysUnderBudget >= 5) {
-            tips.push({
-                icon: 'checkmark-circle',
-                color: '#10b981',
-                text: `Great job! You stayed within budget for ${daysUnderBudget} days this week.`,
-            });
+        if (viewMode === 'weekly') {
+            const daysUnderBudget = chartData.filter(d => d.value <= (metrics.budget / 7)).length;
+            if (daysUnderBudget >= 5) {
+                tips.push({
+                    icon: 'checkmark-circle',
+                    color: '#10b981',
+                    text: `Great job! You stayed within budget for ${daysUnderBudget} days this week.`,
+                });
+            }
+        } else {
+            const weeksUnderBudget = chartData.filter(w => w.value <= (metrics.budget / 4)).length;
+            if (weeksUnderBudget >= 3) {
+                tips.push({
+                    icon: 'checkmark-circle',
+                    color: '#10b981',
+                    text: `Excellent! You stayed within budget for ${weeksUnderBudget} weeks this month.`,
+                });
+            }
         }
         
-        // Savings comparison
-        const savingsRate = metrics.income > 
-            0 ? ((metrics.balance / metrics.income) * 100) 
-            : 0;
-        
+        const savingsRate = metrics.income > 0 ? ((metrics.balance / metrics.income) * 100) : 0;
         if (savingsRate > 15) {
             tips.push({
                 icon: 'trophy',
                 color: '#10b981',
-                text: `You saved ${savingsRate.toFixed(0)}% of your income this week!`,
+                text: `You saved ${savingsRate.toFixed(0)}% of your income this ${viewMode === 'weekly' ? 'week' : 'month'}!`,
             });
         }
         
-        // Top spending category
         if (topCategories.length > 0) {
             const top = topCategories[0];
             tips.push({
@@ -300,33 +351,22 @@ export default function WeeklyReportScreen({ navigation }) {
             });
         }
         
-        // Expense trend
-        if (metrics.expenseChange < -10) {
-            tips.push({
-                icon: 'trending-down',
-                color: '#10b981',
-                text: `Spending decreased by ${Math.abs(metrics.expenseChange).toFixed(0)}% from last week!`,
-            });
-        } else if (metrics.expenseChange > 10) {
-            tips.push({
-                icon: 'alert-circle',
-                color: '#ef4444',
-                text: `Spending increased by ${metrics.expenseChange.toFixed(0)}% compared to last week.`,
-            });
-        }
-        
         return tips.slice(0, 3);
-    }, [metrics, topCategories, dailySpending]);
+    }, [metrics, topCategories, chartData, viewMode]);
 
     // Export report
     const handleExport = async (format) => {
         try {
-            const { start, end } = getISOWeekBounds(weekOffset);
-            const weekRange = formatWeekRange(start, end);
+            const bounds = viewMode === 'weekly' 
+                ? getISOWeekBounds(timeOffset) 
+                : getMonthBounds(timeOffset);
+            const dateRange = viewMode === 'weekly' 
+                ? formatWeekRange(bounds.start, bounds.end)
+                : formatMonthRange(bounds.start);
             
             const reportText = `
-WEEKLY FINANCIAL REPORT
-${weekRange}
+${viewMode.toUpperCase()} FINANCIAL REPORT
+${dateRange}
 
 SUMMARY
 -------
@@ -341,9 +381,9 @@ ${topCategories.map((cat, i) =>
     `${i + 1}. ${cat.name}: Rs. ${cat.amount.toLocaleString()} (${cat.percentage.toFixed(0)}%)`
 ).join('\n')}
 
-DAILY BREAKDOWN
+${viewMode === 'weekly' ? 'DAILY' : 'WEEKLY'} BREAKDOWN
 ---------------
-${dailySpending.map(d => 
+${chartData.map(d => 
     `${d.label}: Rs. ${d.value.toLocaleString()}`
 ).join('\n')}
 
@@ -355,7 +395,7 @@ ${insights.map((insight, i) => `${i + 1}. ${insight.text}`).join('\n')}
             if (format === 'share') {
                 await Share.share({
                     message: reportText,
-                    title: 'Weekly Financial Report',
+                    title: `${viewMode === 'weekly' ? 'Weekly' : 'Monthly'} Financial Report`,
                 });
             }
             
@@ -370,17 +410,20 @@ ${insights.map((insight, i) => `${i + 1}. ${insight.text}`).join('\n')}
         return (
             <View style={styles.loadingContainer}>
                 <ActivityIndicator size="large" color={theme.colors.primary} />
-                <Text style={styles.loadingText}>Loading weekly report...</Text>
+                <Text style={styles.loadingText}>Loading {viewMode} report...</Text>
             </View>
         );
     }
 
-    const { start, end } = getISOWeekBounds(weekOffset);
-    const weekRange = formatWeekRange(start, end);
+    const bounds = viewMode === 'weekly' 
+        ? getISOWeekBounds(timeOffset) 
+        : getMonthBounds(timeOffset);
+    const dateRange = viewMode === 'weekly' 
+        ? formatWeekRange(bounds.start, bounds.end)
+        : formatMonthRange(bounds.start);
     const budgetUsagePercent = (metrics.expenses / metrics.budget) * 100;
     
-    // Logic for Savings & Surplus Analysis
-    const savingsGoalPercent = 0.20; // 20% savings goal
+    const savingsGoalPercent = 0.20;
     const targetSavings = metrics.income * savingsGoalPercent;
     const surplusOrDeficit = metrics.balance - targetSavings;
     const isMeetingGoal = surplusOrDeficit >= 0;
@@ -394,11 +437,13 @@ ${insights.map((insight, i) => `${i + 1}. ${insight.text}`).join('\n')}
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.scrollContent}
             >
-                {/* Header */}
+                {/* Header with View Toggle */}
                 <View style={styles.header}>
                     <View>
-                        <Text style={styles.headerTitle}>Weekly Report</Text>
-                        <Text style={styles.headerSubtitle}>{weekRange}</Text>
+                        <Text style={styles.headerTitle}>
+                            {viewMode === 'weekly' ? 'Weekly' : 'Monthly'} Report
+                        </Text>
+                        <Text style={styles.headerSubtitle}>{dateRange}</Text>
                     </View>
                     <TouchableOpacity 
                         style={styles.exportButton}
@@ -408,40 +453,78 @@ ${insights.map((insight, i) => `${i + 1}. ${insight.text}`).join('\n')}
                     </TouchableOpacity>
                 </View>
 
-                {/* Week Navigator */}
-                <View style={styles.weekNavigator}>
+                {/* View Mode Toggle */}
+                <View style={styles.viewModeToggle}>
+                    <TouchableOpacity
+                        style={[styles.toggleButton, viewMode === 'weekly' && styles.activeToggleButton]}
+                        onPress={() => {
+                            setViewMode('weekly');
+                            setTimeOffset(0);
+                        }}
+                    >
+                        <Ionicons 
+                            name="calendar" 
+                            size={18} 
+                            color={viewMode === 'weekly' ? '#ffffff' : '#9ca3af'} 
+                        />
+                        <Text style={[styles.toggleButtonText, viewMode === 'weekly' && styles.activeToggleButtonText]}>
+                            Weekly
+                        </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.toggleButton, viewMode === 'monthly' && styles.activeToggleButton]}
+                        onPress={() => {
+                            setViewMode('monthly');
+                            setTimeOffset(0);
+                        }}
+                    >
+                        <Ionicons 
+                            name="calendar-outline" 
+                            size={18} 
+                            color={viewMode === 'monthly' ? '#ffffff' : '#9ca3af'} 
+                        />
+                        <Text style={[styles.toggleButtonText, viewMode === 'monthly' && styles.activeToggleButtonText]}>
+                            Monthly
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+
+                {/* Period Navigator */}
+                <View style={styles.periodNavigator}>
                     <TouchableOpacity 
-                        style={styles.weekNavButton}
-                        onPress={() => setWeekOffset(prev => prev - 1)}
+                        style={styles.navButton}
+                        onPress={() => setTimeOffset(prev => prev - 1)}
                     >
                         <Ionicons name="chevron-back" size={24} color="#10b981" />
                     </TouchableOpacity>
                     
                     <TouchableOpacity 
-                        onPress={() => setWeekOffset(0)}
-                        disabled={weekOffset === 0}
+                        onPress={() => setTimeOffset(0)}
+                        disabled={timeOffset === 0}
                     >
-                        <Text style={[styles.weekNavText, weekOffset === 0 && styles.currentWeekText]}>
-                            {weekOffset === 0 ? 'This Week' : `${Math.abs(weekOffset)} week${Math.abs(weekOffset) > 1 ? 's' : ''} ago`}
+                        <Text style={[styles.navText, timeOffset === 0 && styles.currentNavText]}>
+                            {timeOffset === 0 
+                                ? `This ${viewMode === 'weekly' ? 'Week' : 'Month'}` 
+                                : `${Math.abs(timeOffset)} ${viewMode === 'weekly' ? 'week' : 'month'}${Math.abs(timeOffset) > 1 ? 's' : ''} ago`
+                            }
                         </Text>
                     </TouchableOpacity>
                     
                     <TouchableOpacity 
-                        style={[styles.weekNavButton, weekOffset === 0 && styles.weekNavButtonDisabled]}
-                        onPress={() => setWeekOffset(prev => Math.min(prev + 1, 0))}
-                        disabled={weekOffset === 0}
+                        style={[styles.navButton, timeOffset === 0 && styles.navButtonDisabled]}
+                        onPress={() => setTimeOffset(prev => Math.min(prev + 1, 0))}
+                        disabled={timeOffset === 0}
                     >
                         <Ionicons 
                             name="chevron-forward" 
                             size={24} 
-                            color={weekOffset === 0 ? '#4b5563' : '#10b981'} 
+                            color={timeOffset === 0 ? '#4b5563' : '#10b981'} 
                         />
                     </TouchableOpacity>
                 </View>
 
                 {/* Summary Cards */}
                 <View style={styles.summaryContainer}>
-                    {/* Income Card */}
                     <AnimatedCard delay={100} style={styles.summaryCard}>
                         <LinearGradient
                             colors={['#10b981', '#059669']}
@@ -451,16 +534,6 @@ ${insights.map((insight, i) => `${i + 1}. ${insight.text}`).join('\n')}
                         >
                             <View style={styles.summaryHeader}>
                                 <Ionicons name="arrow-up-circle" size={28} color="#ffffff" />
-                                <View style={styles.changeIndicator}>
-                                    <Ionicons 
-                                        name={metrics.incomeChange >= 0 ? "trending-up" : "trending-down"} 
-                                        size={12} 
-                                        color="#ffffff" 
-                                    />
-                                    <Text style={styles.changeText}>
-                                        {Math.abs(metrics.incomeChange).toFixed(1)}%
-                                    </Text>
-                                </View>
                             </View>
                             <Text style={styles.summaryLabel}>Total Income</Text>
                             <Text style={styles.summaryValue}>
@@ -469,7 +542,6 @@ ${insights.map((insight, i) => `${i + 1}. ${insight.text}`).join('\n')}
                         </LinearGradient>
                     </AnimatedCard>
 
-                    {/* Expenses Card */}
                     <AnimatedCard delay={200} style={styles.summaryCard}>
                         <LinearGradient
                             colors={['#ef4444', '#dc2626']}
@@ -479,16 +551,6 @@ ${insights.map((insight, i) => `${i + 1}. ${insight.text}`).join('\n')}
                         >
                             <View style={styles.summaryHeader}>
                                 <Ionicons name="arrow-down-circle" size={28} color="#ffffff" />
-                                <View style={styles.changeIndicator}>
-                                    <Ionicons 
-                                        name={metrics.expenseChange <= 0 ? "trending-down" : "trending-up"} 
-                                        size={12} 
-                                        color="#ffffff" 
-                                    />
-                                    <Text style={styles.changeText}>
-                                        {Math.abs(metrics.expenseChange).toFixed(1)}%
-                                    </Text>
-                                </View>
                             </View>
                             <Text style={styles.summaryLabel}>Total Expenses</Text>
                             <Text style={styles.summaryValue}>
@@ -497,7 +559,6 @@ ${insights.map((insight, i) => `${i + 1}. ${insight.text}`).join('\n')}
                         </LinearGradient>
                     </AnimatedCard>
 
-                    {/* Balance Card */}
                     <AnimatedCard delay={300} style={styles.summaryCardWide}>
                         <LinearGradient
                             colors={metrics.balance >= 0 ? ['#3b82f6', '#2563eb'] : ['#ef4444', '#dc2626']}
@@ -507,23 +568,12 @@ ${insights.map((insight, i) => `${i + 1}. ${insight.text}`).join('\n')}
                         >
                             <View style={styles.summaryHeader}>
                                 <Ionicons name="wallet" size={28} color="#ffffff" />
-                                <View style={styles.changeIndicator}>
-                                    <Ionicons 
-                                        name={metrics.balanceChange >= 0 ? "trending-up" : "trending-down"} 
-                                        size={12} 
-                                        color="#ffffff" 
-                                    />
-                                    <Text style={styles.changeText}>
-                                        {Math.abs(metrics.balanceChange).toFixed(1)}%
-                                    </Text>
-                                </View>
                             </View>
                             <Text style={styles.summaryLabel}>Net Balance</Text>
                             <Text style={styles.summaryValue}>
                                 Rs. {Math.abs(metrics.balance).toLocaleString()}
                             </Text>
                             
-                            {/* Budget Progress Bar */}
                             <View style={styles.budgetProgressContainer}>
                                 <View style={styles.budgetProgressBar}>
                                     <View 
@@ -565,7 +615,7 @@ ${insights.map((insight, i) => `${i + 1}. ${insight.text}`).join('\n')}
                     </AnimatedCard>
                 )}
 
-                {/* Expense Breakdown Pie Chart - ADJUSTED SIZES */}
+                {/* Expense Breakdown Pie Chart */}
                 {categoryData.length > 0 && (
                     <AnimatedCard delay={500}>
                         <Text style={styles.sectionTitle}>Expense Breakdown</Text>
@@ -576,8 +626,8 @@ ${insights.map((insight, i) => `${i + 1}. ${insight.text}`).join('\n')}
                                 showText
                                 textColor="#ffffff"
                                 textSize={10}
-                                radius={125} // Increased size
-                                innerRadius={65} // Decreased size
+                                radius={125}
+                                innerRadius={65}
                                 innerCircleColor="#1E1E1E"
                                 focusOnPress
                                 onPress={(item) => setSelectedCategory(item)}
@@ -621,7 +671,7 @@ ${insights.map((insight, i) => `${i + 1}. ${insight.text}`).join('\n')}
                     </AnimatedCard>
                 )}
 
-                {/* Top Categories List */}
+                {/* Top Categories */}
                 {topCategories.length > 0 && (
                     <AnimatedCard delay={600}>
                         <Text style={styles.sectionTitle}>Top Spending Categories</Text>
@@ -661,30 +711,26 @@ ${insights.map((insight, i) => `${i + 1}. ${insight.text}`).join('\n')}
                     </AnimatedCard>
                 )}
 
-                {/* Enhanced Daily Spending Trend */}
+                {/* Spending Pattern Chart */}
                 <AnimatedCard delay={700}>
                     <View style={styles.trendHeader}>
                         <View>
-                            <Text style={styles.sectionTitle}>Daily Spending Pattern</Text>
+                            <Text style={styles.sectionTitle}>
+                                {viewMode === 'weekly' ? 'Daily' : 'Weekly'} Spending Pattern
+                            </Text>
                             <Text style={styles.sectionSubtitle}>
-                                Average: Rs. {(metrics.expenses / 7).toLocaleString('en-US', { maximumFractionDigits: 0 })} per day
+                                Average: Rs. {(metrics.expenses / (viewMode === 'weekly' ? 7 : 4)).toLocaleString('en-US', { maximumFractionDigits: 0 })} per {viewMode === 'weekly' ? 'day' : 'week'}
                             </Text>
-                        </View>
-                        <View style={styles.trendStats}>
-                            <Text style={styles.trendStatValue}>
-                                {dailySpending.filter(d => d.value > 0).length}/7
-                            </Text>
-                            <Text style={styles.trendStatLabel}>Days Active</Text>
                         </View>
                     </View>
                     
                     <View style={styles.enhancedBarChartContainer}>
                         <BarChart
-                            data={dailySpending}
+                            data={chartData}
                             width={320}
                             height={220}
-                            barWidth={32}
-                            spacing={18}
+                            barWidth={viewMode === 'weekly' ? 32 : 48}
+                            spacing={viewMode === 'weekly' ? 18 : 12}
                             roundedTop
                             roundedBottom
                             noOfSections={5}
@@ -762,7 +808,7 @@ ${insights.map((insight, i) => `${i + 1}. ${insight.text}`).join('\n')}
                     </View>
                     <View style={styles.analysisTip}>
                         <Text style={styles.analysisTipText}>
-                            **Tip:** To hit your 20% goal, consider reducing spending in your top categories by Rs. {(Math.abs(surplusOrDeficit) / 7).toLocaleString('en-US', { maximumFractionDigits: 0 })} per day next week.
+                            **Tip:** To hit your 20% goal, consider reducing spending in your top categories by Rs. {(Math.abs(surplusOrDeficit) / (viewMode === 'weekly' ? 7 : 30)).toLocaleString('en-US', { maximumFractionDigits: 0 })} per day.
                         </Text>
                     </View>
                 </AnimatedCard>
@@ -818,7 +864,36 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
-    weekNavigator: {
+    viewModeToggle: {
+        flexDirection: 'row',
+        marginHorizontal: 20,
+        marginBottom: 16,
+        backgroundColor: '#1f2937',
+        borderRadius: 12,
+        padding: 4,
+    },
+    toggleButton: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+        gap: 8,
+    },
+    activeToggleButton: {
+        backgroundColor: '#10b981',
+    },
+    toggleButtonText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#9ca3af',
+    },
+    activeToggleButtonText: {
+        color: '#ffffff',
+    },
+    periodNavigator: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
@@ -829,18 +904,18 @@ const styles = StyleSheet.create({
         backgroundColor: '#1f2937',
         borderRadius: 16,
     },
-    weekNavButton: {
+    navButton: {
         padding: 8,
     },
-    weekNavButtonDisabled: {
+    navButtonDisabled: {
         opacity: 0.3,
     },
-    weekNavText: {
+    navText: {
         fontSize: 16,
         color: '#9ca3af',
         fontWeight: '600',
     },
-    currentWeekText: {
+    currentNavText: {
         color: '#10b981',
     },
     summaryContainer: {
@@ -876,20 +951,6 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-    },
-    changeIndicator: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(255, 255, 255, 0.2)',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 12,
-        gap: 4,
-    },
-    changeText: {
-        fontSize: 11,
-        fontWeight: '700',
-        color: '#ffffff',
     },
     summaryLabel: {
         fontSize: 13,
@@ -1038,25 +1099,11 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#9ca3af',
     },
-    // Enhanced Daily Trend Styles
     trendHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
         marginBottom: 20,
-    },
-    trendStats: {
-        alignItems: 'flex-end',
-    },
-    trendStatValue: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        color: '#10b981',
-    },
-    trendStatLabel: {
-        fontSize: 11,
-        color: '#9ca3af',
-        marginTop: 2,
     },
     enhancedBarChartContainer: {
         alignItems: 'center',
@@ -1093,7 +1140,6 @@ const styles = StyleSheet.create({
         color: '#9ca3af',
         fontWeight: '600',
     },
-    // NEW: Savings & Surplus Analysis Styles
     analysisHeader: {
         flexDirection: 'row',
         alignItems: 'center',

@@ -1,120 +1,253 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Alert, ActivityIndicator } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
-import { useNavigation } from '@react-navigation/native';
-import { theme } from '../styles/theme';
-import CustomButton from '../components/CustomButton';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import * as FileSystem from 'expo-file-system';
+import * as ImagePicker from 'expo-image-picker';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Image, StyleSheet, Text, View } from 'react-native';
+import CustomButton from '../components/CustomButton';
+import { theme } from '../styles/theme';
 
-// --- PASTE YOUR GOOGLE CLOUD VISION API KEY HERE ---
 const GOOGLE_VISION_API_KEY = 'AIzaSyDYy3F2dANKnHSw61Zud2BRJlOPLSbVYU8';
-// ----------------------------------------------------
 
 export default function ScanReceiptScreen() {
     const navigation = useNavigation();
     const [loading, setLoading] = useState(false);
+    const [previewImage, setPreviewImage] = useState(null);
+    const [debugInfo, setDebugInfo] = useState('');
 
     useEffect(() => {
-        (async () => {
-            await ImagePicker.requestCameraPermissionsAsync();
-            await ImagePicker.requestMediaLibraryPermissionsAsync();
-        })();
+        requestPermissions();
     }, []);
 
-    const handleTakePhoto = async () => {
-        const { status } = await ImagePicker.getCameraPermissionsAsync();
-        if (status !== 'granted') {
-            Alert.alert('Permission Denied', 'Camera access is required to take a photo.');
-            return;
+    const requestPermissions = async () => {
+        try {
+            const { status: cameraStatus } = await ImagePicker.requestCameraPermissionsAsync();
+            const { status: libraryStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+            if (cameraStatus !== 'granted') {
+                Alert.alert('Permission Required', 'Camera access is needed.');
+            }
+            if (libraryStatus !== 'granted') {
+                Alert.alert('Permission Required', 'Photo library access is needed.');
+            }
+        } catch (error) {
+            console.error('Permission error:', error);
         }
-        let result = await ImagePicker.launchCameraAsync({ quality: 1 });
-        if (!result.canceled) processImageForOcr(result.assets[0].uri);
     };
 
-    const handleChooseFromGallery = async () => {
-        const { status } = await ImagePicker.getMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-            Alert.alert('Permission Denied', 'Gallery access is required to choose a photo.');
-            return;
+    // -------------------------------------------------------------
+    // 📌 Capture a photo
+    // -------------------------------------------------------------
+    const handleTakePhoto = async () => {
+        try {
+            const { status } = await ImagePicker.getCameraPermissionsAsync();
+            if (status !== 'granted') {
+                Alert.alert('Permission Denied', 'Camera access is required to take a photo.');
+                return;
+            }
+
+            const result = await ImagePicker.launchCameraAsync({
+                mediaTypes: [ImagePicker.MediaType.Image], // UPDATED ✔
+                quality: 0.8,
+                allowsEditing: true,
+                aspect: [4, 3],
+            });
+
+            if (!result.canceled && result.assets[0]) {
+                const uri = result.assets[0].uri;
+                setPreviewImage(uri);
+                await processImageForOcr(uri);
+            }
+        } catch (error) {
+            console.error('Camera error:', error);
+            Alert.alert('Error', 'Failed to take photo.');
         }
-        let result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 1 });
-        if (!result.canceled) processImageForOcr(result.assets[0].uri);
     };
-    
+
+    // -------------------------------------------------------------
+    // 📌 Select image from gallery
+    // -------------------------------------------------------------
+    const handleChooseFromGallery = async () => {
+        try {
+            const { status } = await ImagePicker.getMediaLibraryPermissionsAsync();
+            if (status !== 'granted') {
+                Alert.alert('Permission Denied', 'Gallery access is required.');
+                return;
+            }
+
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: [ImagePicker.MediaType.Image], // UPDATED ✔
+                quality: 0.8,
+                allowsEditing: true,
+                aspect: [4, 3],
+            });
+
+            if (!result.canceled && result.assets[0]) {
+                const uri = result.assets[0].uri;
+                setPreviewImage(uri);
+                await processImageForOcr(uri);
+            }
+        } catch (error) {
+            console.error('Gallery error:', error);
+            Alert.alert('Error', 'Failed to select image.');
+        }
+    };
+
+    // -------------------------------------------------------------
+    // 📌 Convert image to Base64 and send to Google Vision API
+    // -------------------------------------------------------------
     const processImageForOcr = async (imageUri) => {
-        if (GOOGLE_VISION_API_KEY === 'YOUR_API_KEY_HERE') {
-            Alert.alert('API Key Missing', 'Please add your Google Cloud Vision API key to ScanReceiptScreen.js');
+        if (!GOOGLE_VISION_API_KEY) {
+            Alert.alert("Error", "Google Vision API key missing.");
             return;
         }
 
         setLoading(true);
+        setDebugInfo('Reading image...');
+
         try {
-            const base64ImageData = await FileSystem.readAsStringAsync(imageUri, { encoding: FileSystem.EncodingType.Base64 });
-            const requestBody = {
-                requests: [{ image: { content: base64ImageData }, features: [{ type: 'TEXT_DETECTION' }] }],
-            };
-
-            const apiResponse = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_VISION_API_KEY}`, {
-                method: 'POST',
-                headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestBody),
+            // Convert image to Base64
+            const base64Image = await FileSystem.readAsStringAsync(imageUri, {
+                encoding: FileSystem.EncodingType.Base64,
             });
-            
-            const responseJson = await apiResponse.json();
 
-            // Improved Error Handling
-            if (responseJson.error) {
-                console.error(responseJson.error);
-                Alert.alert('Google API Error', responseJson.error.message + "\n\nPlease ensure your API key is correct and billing is enabled on your Google Cloud project.");
-            } else if (responseJson.responses && responseJson.responses[0].fullTextAnnotation) {
-                const detectedText = responseJson.responses[0].fullTextAnnotation.text;
-                parseOcrResult(detectedText);
-            } else {
-                Alert.alert('OCR Failed', 'No text could be extracted from the image. Please try again with a clearer picture.');
+            if (!base64Image) {
+                throw new Error("Failed to read image.");
             }
 
-        } catch (error) {
-            console.error(error);
-            Alert.alert('Error', 'An error occurred while processing the image.');
-        } finally {
+            setDebugInfo('Sending to Google Vision API...');
+
+            const requestBody = {
+                requests: [
+                    {
+                        image: { content: base64Image },
+                        features: [{ type: 'TEXT_DETECTION', maxResults: 1 }],
+                    },
+                ],
+            };
+
+            const apiUrl = `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_VISION_API_KEY}`;
+
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestBody),
+            });
+
+            const data = await response.json();
+            console.log("OCR Response:", data);
+
+            if (data.error) {
+                Alert.alert("Vision API Error", data.error.message);
+                setLoading(false);
+                return;
+            }
+
+            const text =
+                data.responses?.[0]?.fullTextAnnotation?.text ??
+                '';
+
+            if (text.length === 0) {
+                Alert.alert("No Text Found", "Receipt text could not be detected.");
+                setLoading(false);
+                return;
+            }
+
+            parseOcrResult(text);
+
+        } catch (err) {
+            Alert.alert("Error", "Failed to process image.\n\n" + err.message);
             setLoading(false);
         }
     };
-    
+
+    // -------------------------------------------------------------
+    // 📌 Parse extracted text → amount, title, category
+    // -------------------------------------------------------------
     const parseOcrResult = (text) => {
         let amount = '0.00';
         let title = 'Scanned Receipt';
-        
-        const lines = text.split('\n');
-        const totalLine = lines.find(line => line.toLowerCase().includes('total') || line.toLowerCase().includes('amount'));
-        
-        let foundAmount;
-        if (totalLine) {
-            foundAmount = totalLine.match(/(\d+\.\d{2})/);
-        } else {
-            const amounts = text.match(/(\d+\.\d{2})/g) || [];
-            const numericAmounts = amounts.map(parseFloat);
-            if (numericAmounts.length > 0) {
-                foundAmount = [Math.max(...numericAmounts).toFixed(2)];
+        let category = 'other';
+
+        try {
+            const lines = text
+                .split("\n")
+                .map(t => t.trim())
+                .filter(Boolean);
+
+            const totalKeywords = ['total', 'amount', 'grand', 'subtotal'];
+
+            let foundAmount = null;
+
+            for (let i = 0; i < lines.length; i++) {
+                const lower = lines[i].toLowerCase();
+
+                if (totalKeywords.some(kw => lower.includes(kw))) {
+                    const nums = (lines[i] + " " + (lines[i + 1] ?? ""))
+                        .match(/\d+(?:\.\d{2})?/g);
+
+                    if (nums) {
+                        foundAmount = Math.max(...nums.map(n => parseFloat(n)));
+                        break;
+                    }
+                }
             }
+
+            if (!foundAmount) {
+                const nums = text.match(/\d+(?:\.\d{2})?/g);
+                if (nums) {
+                    foundAmount = Math.max(...nums.map(n => parseFloat(n)));
+                }
+            }
+
+            if (foundAmount) amount = foundAmount.toFixed(2);
+
+            // Guess title
+            const store = lines.find(line =>
+                /[a-zA-Z]/.test(line) && !/^\d+$/.test(line)
+            );
+
+            if (store) title = store.slice(0, 50);
+
+            // Auto detect category
+            const l = title.toLowerCase();
+            if (l.includes("food") || l.includes("cafe")) category = "food";
+            if (l.includes("fuel") || l.includes("petrol")) category = "transport";
+            if (l.includes("pharmacy") || l.includes("medical")) category = "health";
+            if (l.includes("mart") || l.includes("store")) category = "shopping";
+
+        } catch (err) {
+            console.error("Parsing error:", err);
         }
 
-        if (foundAmount) {
-            amount = foundAmount[0];
-        }
+        setLoading(false);
 
-        navigation.navigate('Transactions', {
-            screen: 'AddTransaction',
-            params: { amount, title, note: text },
+        navigation.navigate("Transactions", {
+            screen: "AddTransaction",
+            params: {
+                amount,
+                title,
+                category,
+                note: "Scanned Receipt:\n\n" + text,
+            },
         });
     };
 
+    // -------------------------------------------------------------
+    // 📌 UI Rendering
+    // -------------------------------------------------------------
     if (loading) {
         return (
             <View style={styles.container}>
+                {previewImage && (
+                    <Image source={{ uri: previewImage }} style={styles.previewImage} />
+                )}
                 <ActivityIndicator size="large" color={theme.colors.primary} />
-                <Text style={styles.subtitle}>Analyzing Receipt...</Text>
+                <Text style={styles.subtitle}>{debugInfo}</Text>
+                <Text style={styles.debugText}>Please wait...</Text>
             </View>
         );
     }
@@ -122,26 +255,20 @@ export default function ScanReceiptScreen() {
     return (
         <View style={styles.container}>
             <Ionicons name="scan-circle-outline" size={100} color={theme.colors.primary} />
-            <Text style={styles.title}>Scan or Upload a Receipt</Text>
-            <Text style={styles.subtitle}>Choose an option below to add a new transaction from a receipt.</Text>
+            <Text style={styles.title}>Scan Your Receipt</Text>
+            <Text style={styles.subtitle}>Capture or upload a receipt to extract details automatically.</Text>
+
             <View style={styles.buttonContainer}>
-                 <CustomButton
-                    title="Use Camera"
-                    onPress={handleTakePhoto}
-                    variant="primary"
-                    style={{ flex: 1 }}
-                />
-                 <CustomButton
-                    title="From Gallery"
-                    onPress={handleChooseFromGallery}
-                    variant="secondary"
-                    style={{ flex: 1 }}
-                />
+                <CustomButton title="Take Photo" onPress={handleTakePhoto} variant="primary" />
+                <CustomButton title="Choose from Gallery" onPress={handleChooseFromGallery} variant="secondary" />
             </View>
         </View>
     );
 }
 
+// -------------------------------------------------------------
+// 📌 Styles
+// -------------------------------------------------------------
 const styles = StyleSheet.create({
     container: {
         flex: 1,
@@ -155,18 +282,31 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         color: theme.colors.text_primary,
         marginBottom: theme.spacing.md,
-        marginTop: theme.spacing.lg,
         textAlign: 'center',
     },
     subtitle: {
         fontSize: theme.fontSize.base,
         color: theme.colors.text_secondary,
         textAlign: 'center',
-        marginBottom: theme.spacing.xl,
+        marginBottom: theme.spacing.lg,
+        paddingHorizontal: theme.spacing.md,
     },
     buttonContainer: {
         flexDirection: 'row',
         gap: theme.spacing.md,
         width: '100%',
-    }
+        marginTop: theme.spacing.lg,
+    },
+    previewImage: {
+        width: 200,
+        height: 200,
+        borderRadius: theme.borderRadius.md,
+        marginBottom: theme.spacing.md,
+    },
+    debugText: {
+        fontSize: theme.fontSize.sm,
+        color: theme.colors.text_secondary,
+        marginTop: theme.spacing.sm,
+        fontStyle: 'italic',
+    },
 });
