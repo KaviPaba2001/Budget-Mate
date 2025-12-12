@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-    ActivityIndicator,
     FlatList,
     Modal,
     SafeAreaView,
@@ -15,11 +14,10 @@ import { theme } from '../styles/theme';
 
 export default function CategoryPicker({ selectedCategory, onSelectCategory, type = 'expense' }) {
     const [modalVisible, setModalVisible] = useState(false);
-    const [categories, setCategories] = useState([]);
-    const [loading, setLoading] = useState(false);
+    const [customCategories, setCustomCategories] = useState([]);
 
-    // Predefined categories for expense and income
-    const expenseCategories = [
+    // Static categories definitions
+    const expenseCategories = useMemo(() => [
         { id: 'food', name: 'Food & Dining', icon: 'restaurant' },
         { id: 'transport', name: 'Transportation', icon: 'car' },
         { id: 'shopping', name: 'Shopping', icon: 'bag' },
@@ -28,56 +26,56 @@ export default function CategoryPicker({ selectedCategory, onSelectCategory, typ
         { id: 'health', name: 'Healthcare', icon: 'medical' },
         { id: 'education', name: 'Education', icon: 'school' },
         { id: 'other', name: 'Other', icon: 'ellipsis-horizontal' },
-    ];
+    ], []);
 
-    const incomeCategories = [
+    const incomeCategories = useMemo(() => [
         { id: 'salary', name: 'Salary', icon: 'briefcase' },
         { id: 'freelance', name: 'Freelance', icon: 'laptop' },
         { id: 'business', name: 'Business', icon: 'storefront' },
         { id: 'investment', name: 'Investment', icon: 'trending-up' },
         { id: 'gift', name: 'Gift', icon: 'gift' },
         { id: 'other', name: 'Other', icon: 'ellipsis-horizontal' },
-    ];
+    ], []);
 
-    // Load categories when modal opens
-    useEffect(() => {
-        if (modalVisible) {
-            loadCategories();
-        }
-    }, [modalVisible, type]);
-
-    const loadCategories = async () => {
-        setLoading(true);
-        try {
-            // Get base categories based on type
-            const baseCategories = type === 'expense' ? [...expenseCategories] : [...incomeCategories];
-            
-            // Get custom budgets from Firebase (only for expense)
-            if (type === 'expense') {
-                const budgets = await getBudgets();
-                
-                // Add custom categories that aren't in base categories
-                Object.keys(budgets).forEach(categoryId => {
-                    const exists = baseCategories.some(cat => cat.id === categoryId);
-                    if (!exists) {
-                        // Create custom category
-                        const categoryName = categoryId.charAt(0).toUpperCase() + categoryId.slice(1);
-                        baseCategories.push({
-                            id: categoryId,
-                            name: categoryName,
-                            icon: 'ellipsis-horizontal',
-                        });
-                    }
-                });
+    // Combine base and custom categories
+    const categories = useMemo(() => {
+        const base = type === 'expense' ? expenseCategories : incomeCategories;
+        // Merge custom categories, ensuring no duplicates by ID
+        const combined = [...base];
+        customCategories.forEach(custom => {
+            if (!combined.some(c => c.id === custom.id)) {
+                combined.push(custom);
             }
-            
-            setCategories(baseCategories);
+        });
+        return combined;
+    }, [type, expenseCategories, incomeCategories, customCategories]);
+
+    // Load custom categories on mount so the initial value displays correctly
+    useEffect(() => {
+        if (type === 'expense') {
+            loadCustomCategories();
+        }
+    }, [type]);
+
+    const loadCustomCategories = async () => {
+        try {
+            const budgets = await getBudgets();
+            const newCustomCats = [];
+            Object.keys(budgets).forEach(categoryId => {
+                // Check if it's already in base categories
+                const isBase = expenseCategories.some(cat => cat.id === categoryId);
+                if (!isBase) {
+                    const categoryName = categoryId.charAt(0).toUpperCase() + categoryId.slice(1);
+                    newCustomCats.push({
+                        id: categoryId,
+                        name: categoryName,
+                        icon: 'ellipsis-horizontal',
+                    });
+                }
+            });
+            setCustomCategories(newCustomCats);
         } catch (error) {
-            console.error('Error loading categories:', error);
-            // Fallback to base categories if error
-            setCategories(type === 'expense' ? expenseCategories : incomeCategories);
-        } finally {
-            setLoading(false);
+            console.error('Error loading custom categories:', error);
         }
     };
 
@@ -156,21 +154,14 @@ export default function CategoryPicker({ selectedCategory, onSelectCategory, typ
                             </View>
                             
                             {/* Category List */}
-                            {loading ? (
-                                <View style={styles.loadingContainer}>
-                                    <ActivityIndicator size="large" color={theme.colors.primary} />
-                                    <Text style={styles.loadingText}>Loading categories...</Text>
-                                </View>
-                            ) : (
-                                <FlatList
-                                    data={categories}
-                                    renderItem={renderCategoryItem}
-                                    keyExtractor={(item) => item.id}
-                                    style={styles.categoryList}
-                                    showsVerticalScrollIndicator={true}
-                                    contentContainerStyle={styles.categoryListContent}
-                                />
-                            )}
+                            <FlatList
+                                data={categories}
+                                renderItem={renderCategoryItem}
+                                keyExtractor={(item) => item.id}
+                                style={styles.categoryList}
+                                showsVerticalScrollIndicator={true}
+                                contentContainerStyle={styles.categoryListContent}
+                            />
 
                             {/* Close Button */}
                             <TouchableOpacity 
@@ -243,8 +234,8 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'center',
         padding: theme.spacing.lg,
-        paddingTop: theme.spacing.md,
-        borderBottomWidth: 2,
+        paddingTop: theme.spacing.lg,
+        borderBottomWidth: 1,
         borderBottomColor: theme.colors.gray[700],
     },
     modalTitle: {
@@ -259,18 +250,7 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     categoryListContent: {
-        paddingBottom: theme.spacing.md,
-    },
-    loadingContainer: {
-        flex: 1,
-        padding: theme.spacing.xl,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    loadingText: {
-        marginTop: theme.spacing.md,
-        fontSize: theme.fontSize.base,
-        color: theme.colors.text_secondary,
+        paddingBottom: theme.spacing.xl,
     },
     categoryItem: {
         flexDirection: 'row',
@@ -278,11 +258,11 @@ const styles = StyleSheet.create({
         paddingHorizontal: theme.spacing.lg,
         paddingVertical: theme.spacing.lg,
         borderBottomWidth: 1,
-        borderBottomColor: theme.colors.gray[700],
+        borderBottomColor: theme.colors.gray[800],
         backgroundColor: theme.colors.surface,
     },
     selectedCategoryItem: {
-        backgroundColor: 'rgba(16, 185, 129, 0.15)',
+        backgroundColor: 'rgba(16, 185, 129, 0.1)',
         borderLeftWidth: 4,
         borderLeftColor: theme.colors.primary,
     },

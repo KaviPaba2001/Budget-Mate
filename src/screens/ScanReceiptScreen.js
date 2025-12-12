@@ -1,604 +1,444 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
+import { LinearGradient } from 'expo-linear-gradient';
+// Legacy import to handle Expo SDK 52+ file system changes
+import * as FileSystem from 'expo-file-system/legacy';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, StyleSheet, Text, View } from 'react-native';
-import CustomButton from '../components/CustomButton';
+import {
+    ActivityIndicator,
+    Alert,
+    Image,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    Vibration,
+    View
+} from 'react-native';
+import AnimatedView from '../components/AnimatedView';
 import { theme } from '../styles/theme';
 
-// Free OCR API Key
+// ==========================================
+// 🔑 CONFIGURATION
+// ==========================================
+const GEMINI_API_KEY = 'AIzaSyCRdZJ9GvSXO_cR5oQigPqzd01mCfdiB0Y'; 
 const OCR_SPACE_API_KEY = 'K84979664988957'; 
+
+// Updated to use the latest stable model for 2025
+const PRIMARY_GEMINI_MODEL = 'gemini-2.5-flash';
 
 export default function ScanReceiptScreen() {
     const navigation = useNavigation();
     const [loading, setLoading] = useState(false);
     const [previewImage, setPreviewImage] = useState(null);
-    const [debugInfo, setDebugInfo] = useState('');
+    const [statusMessage, setStatusMessage] = useState('');
 
     useEffect(() => {
         requestPermissions();
     }, []);
 
     const requestPermissions = async () => {
-        try {
-            const { status: cameraStatus } = await ImagePicker.requestCameraPermissionsAsync();
-            const { status: libraryStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-            if (cameraStatus !== 'granted') {
-                Alert.alert('Permission Required', 'Camera access is needed to scan receipts.');
-            }
-            if (libraryStatus !== 'granted') {
-                Alert.alert('Permission Required', 'Photo library access is needed.');
-            }
-        } catch (error) {
-            console.error('Permission error:', error);
+        const { status: cameraStatus } = await ImagePicker.requestCameraPermissionsAsync();
+        const { status: libraryStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (cameraStatus !== 'granted' || libraryStatus !== 'granted') {
+            Alert.alert('Permission Required', 'Camera and gallery access are needed.');
         }
     };
 
-    const handleTakePhoto = async () => {
+    // ==========================================
+    // 📸 IMAGE CAPTURE
+    // ==========================================
+    const handleCamera = async () => {
         try {
-            const { status } = await ImagePicker.getCameraPermissionsAsync();
-            if (status !== 'granted') {
-                Alert.alert('Permission Denied', 'Camera access is required.');
-                return;
-            }
-
             const result = await ImagePicker.launchCameraAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                quality: 0.8,
+                mediaTypes: ['images'],
+                quality: 0.6, // Balanced quality
                 allowsEditing: true,
-                aspect: [4, 3],
-                base64: true,
+                aspect: [4, 6],
             });
-
-            if (!result.canceled && result.assets && result.assets[0]) {
-                const asset = result.assets[0];
-                console.log('Photo taken, has base64:', !!asset.base64);
-                setPreviewImage(asset.uri);
-                
-                if (asset.base64) {
-                    await processImageForOcr(asset.base64);
-                } else {
-                    Alert.alert('Error', 'Failed to get image data. Please try again.');
-                }
-            }
+            if (!result.canceled) startScan(result.assets[0].uri);
         } catch (error) {
-            console.error('Camera error:', error);
-            Alert.alert('Error', 'Failed to take photo: ' + error.message);
+            Alert.alert('Error', 'Could not open camera.');
         }
     };
 
-    const handleChooseFromGallery = async () => {
+    const handleGallery = async () => {
         try {
-            const { status } = await ImagePicker.getMediaLibraryPermissionsAsync();
-            if (status !== 'granted') {
-                Alert.alert('Permission Denied', 'Gallery access is required.');
-                return;
-            }
-
             const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                quality: 0.8,
+                mediaTypes: ['images'],
+                quality: 0.6,
                 allowsEditing: true,
-                aspect: [4, 3],
-                base64: true,
             });
-
-            if (!result.canceled && result.assets && result.assets[0]) {
-                const asset = result.assets[0];
-                console.log('Image selected, has base64:', !!asset.base64);
-                setPreviewImage(asset.uri);
-                
-                if (asset.base64) {
-                    await processImageForOcr(asset.base64);
-                } else {
-                    Alert.alert('Error', 'Failed to get image data. Please try again.');
-                }
-            }
+            if (!result.canceled) startScan(result.assets[0].uri);
         } catch (error) {
-            console.error('Gallery error:', error);
-            Alert.alert('Error', 'Failed to select image: ' + error.message);
+            Alert.alert('Error', 'Could not open gallery.');
         }
     };
 
-    const processImageForOcr = async (base64Image) => {
+    const startScan = async (uri) => {
+        setPreviewImage(uri);
         setLoading(true);
-        setDebugInfo('Analyzing receipt...');
-
+        
         try {
-            console.log('Starting smart OCR processing...');
-            setDebugInfo('Reading receipt text...');
-
-            const formData = new FormData();
-            formData.append('base64Image', `data:image/jpeg;base64,${base64Image}`);
-            formData.append('language', 'eng');
-            formData.append('isOverlayRequired', 'false');
-            formData.append('detectOrientation', 'true');
-            formData.append('scale', 'true');
-            formData.append('OCREngine', '2');
-
-            const response = await fetch('https://api.ocr.space/parse/image', {
-                method: 'POST',
-                headers: {
-                    'apikey': OCR_SPACE_API_KEY,
-                },
-                body: formData,
-            });
-
-            const data = await response.json();
+            // Attempt 1: Try Gemini AI (Best Accuracy)
+            setStatusMessage('AI Analysis (Gemini 2.5)...');
+            await processWithGemini(uri);
+        } catch (aiError) {
+            console.log("Gemini failed, switching to backup...", aiError.message);
             
-            if (data.IsErroredOnProcessing) {
-                const errorMessage = data.ErrorMessage?.[0] || "Unknown error from OCR provider.";
-                Alert.alert("OCR Error", errorMessage);
+            // Attempt 2: Fallback to OCR.Space (Reliable Backup)
+            try {
+                setStatusMessage('Switching to Backup Scanner...');
+                const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+                await processWithOCRSpace(base64);
+            } catch (ocrError) {
+                console.error("All methods failed", ocrError);
+                Alert.alert("Scan Failed", "Could not analyze receipt. Please enter details manually.");
                 setLoading(false);
-                return;
             }
-
-            if (!data.ParsedResults || data.ParsedResults.length === 0) {
-                Alert.alert("No Text Found", "Could not read any text. Please try a clearer image.");
-                setLoading(false);
-                return;
-            }
-
-            const text = data.ParsedResults[0].ParsedText;
-            console.log('📄 Extracted text:', text);
-            
-            setDebugInfo('Analyzing transaction details...');
-            await smartParseReceipt(text);
-
-        } catch (err) {
-            console.error('OCR Processing Error:', err);
-            Alert.alert(
-                "Processing Error", 
-                `Failed to process receipt: ${err.message}\n\nPlease check your internet connection and try again.`
-            );
-            setLoading(false);
         }
     };
 
-    const smartParseReceipt = async (text) => {
-        try {
-            console.log('🧠 ========== SMART RECEIPT ANALYSIS ==========');
-            
-            const lines = text.split(/\r?\n/).map(t => t.trim()).filter(Boolean);
-            const fullText = text.toLowerCase();
-            
-            // ============ DETERMINE TRANSACTION TYPE (Income/Expense) ============
-            let transactionType = 'expense'; // Default to expense
-            
-            const incomeKeywords = [
-                'salary', 'payment received', 'deposit', 'credit', 'income', 
-                'refund', 'reimbursement', 'bonus', 'commission', 'dividend',
-                'interest earned', 'cashback', 'reward', 'payment confirmation',
-                'transfer received', 'received from'
-            ];
-            
-            const expenseKeywords = [
-                'receipt', 'invoice', 'bill', 'paid', 'purchase', 'sale',
-                'debit', 'charge', 'total', 'subtotal', 'amount due', 'payment',
-                'thank you for your purchase', 'tax', 'vat', 'gst'
-            ];
-            
-            const incomeScore = incomeKeywords.reduce((score, kw) => 
-                score + (fullText.includes(kw) ? 1 : 0), 0);
-            const expenseScore = expenseKeywords.reduce((score, kw) => 
-                score + (fullText.includes(kw) ? 1 : 0), 0);
-            
-            if (incomeScore > expenseScore) {
-                transactionType = 'income';
-            }
-            
-            console.log('💳 Transaction Type:', transactionType.toUpperCase());
-            console.log('   Income indicators:', incomeScore, '| Expense indicators:', expenseScore);
-            
-            // ============ EXTRACT AMOUNT ============
-            let amount = '';
-            let foundAmount = 0.0;
-            
-            const amountKeywords = [
-                'total', 'amount', 'grand total', 'subtotal', 'balance', 
-                'due', 'pay', 'sum', 'payable', 'net amount', 'final amount',
-                'total amount', 'grand sum', 'amount paid', 'paid'
-            ];
-            
-            // Strategy 1: Look near amount keywords
-            console.log('💰 Searching for amount...');
-            for (let i = 0; i < lines.length; i++) {
-                const lowerLine = lines[i].toLowerCase();
-                
-                if (amountKeywords.some(kw => lowerLine.includes(kw))) {
-                    const searchArea = lines[i] + " " + (lines[i + 1] || "") + " " + (lines[i + 2] || "");
+    // ==========================================
+    // 🧠 METHOD 1: GEMINI AI (Primary)
+    // ==========================================
+    const processWithGemini = async (imageUri) => {
+        const base64 = await FileSystem.readAsStringAsync(imageUri, { encoding: 'base64' });
+
+        const body = {
+            contents: [{
+                parts: [
+                    { text: `You are an expert receipt scanner for Sri Lanka. Analyze this image and extract:
+                    - "merchant": Store name (e.g. Keells, Cargills, Uber, PickMe).
+                    - "amount": Total value (numeric only, ignore LKR/Rs).
+                    - "date": YYYY-MM-DD format.
+                    - "category": Choose strictly one from [food, transport, shopping, utilities, health, entertainment, education, salary, other].
                     
-                    const patterns = [
-                        /(?:Rs\.?|LKR|₹)\s*(\d{1,3}(?:[,\s]\d{3})*(?:[.,]\d{2})?)/gi,  // With currency
-                        /(\d{1,3}(?:[,\s]\d{3})*[.,]\d{2})/g,                           // Formatted
-                        /(\d+[.,]\d{2})/g,                                               // Simple decimal
-                    ];
-                    
-                    for (const pattern of patterns) {
-                        const matches = searchArea.match(pattern);
-                        if (matches) {
-                            const values = matches.map(m => {
-                                const cleaned = m.replace(/[Rs\.₹LKR,\s]/gi, '').replace(',', '.');
-                                return parseFloat(cleaned);
-                            }).filter(v => !isNaN(v) && v > 0);
-                            
-                            if (values.length > 0) {
-                                const maxVal = Math.max(...values);
-                                if (maxVal > foundAmount) {
-                                    foundAmount = maxVal;
-                                    console.log('   ✓ Found amount near keyword:', foundAmount);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // Strategy 2: Find largest reasonable number
-            if (foundAmount === 0) {
-                console.log('   Strategy 2: Finding largest number...');
-                const allPatterns = [
-                    /(?:Rs\.?|LKR|₹)\s*(\d{1,3}(?:[,\s]\d{3})*(?:[.,]\d{2})?)/gi,
-                    /(\d{1,3}(?:[,\s]\d{3})*[.,]\d{2})/g,
-                ];
-                
-                for (const pattern of allPatterns) {
-                    const matches = text.match(pattern);
-                    if (matches) {
-                        const values = matches.map(m => {
-                            const cleaned = m.replace(/[Rs\.₹LKR,\s]/gi, '').replace(',', '.');
-                            return parseFloat(cleaned);
-                        }).filter(v => !isNaN(v) && v > 0 && v < 10000000); // Reasonable range
-                        
-                        if (values.length > 0) {
-                            foundAmount = Math.max(...values);
-                            console.log('   ✓ Largest reasonable number:', foundAmount);
-                            break;
-                        }
-                    }
-                }
-            }
-            
-            if (foundAmount > 0) {
-                amount = foundAmount.toFixed(2);
-            }
-            
-            console.log('💵 Final Amount:', amount || 'NOT FOUND');
-            
-            // ============ SMART CATEGORY DETECTION ============
-            let category = 'other';
-            let categoryConfidence = 0;
-            
-            const categoryPatterns = {
-                food: {
-                    keywords: [
-                        'restaurant', 'cafe', 'coffee', 'burger', 'pizza', 'kitchen',
-                        'dining', 'meal', 'food', 'bakery', 'bistro', 'grill',
-                        'breakfast', 'lunch', 'dinner', 'snack', 'beverage',
-                        'mcdonald', 'kfc', 'subway', 'domino', 'starbucks',
-                        'menu', 'order', 'table', 'waiter', 'tip', 'dine'
-                    ],
-                    weight: 1
-                },
-                transport: {
-                    keywords: [
-                        'fuel', 'gas', 'petrol', 'diesel', 'uber', 'taxi', 'cab',
-                        'station', 'transport', 'bus', 'train', 'metro', 'ticket',
-                        'parking', 'toll', 'vehicle', 'ride', 'driver', 'trip',
-                        'pickup', 'drop', 'fare', 'travel'
-                    ],
-                    weight: 1
-                },
-                shopping: {
-                    keywords: [
-                        'mart', 'market', 'super', 'grocery', 'store', 'shop',
-                        'retail', 'mall', 'clothing', 'fashion', 'electronics',
-                        'goods', 'merchandise', 'purchase', 'bought', 'sale'
-                    ],
-                    weight: 0.8
-                },
-                utilities: {
-                    keywords: [
-                        'electric', 'electricity', 'water', 'bill', 'utility',
-                        'gas bill', 'power', 'energy', 'internet', 'phone',
-                        'mobile', 'broadband', 'wifi', 'telephone', 'subscription'
-                    ],
-                    weight: 1
-                },
-                entertainment: {
-                    keywords: [
-                        'cinema', 'movie', 'theatre', 'theater', 'game', 'gaming',
-                        'entertainment', 'ticket', 'show', 'concert', 'event',
-                        'netflix', 'spotify', 'youtube', 'streaming', 'subscription',
-                        'park', 'museum', 'zoo'
-                    ],
-                    weight: 1
-                },
-                health: {
-                    keywords: [
-                        'pharmacy', 'doctor', 'hospital', 'clinic', 'medical',
-                        'health', 'medicine', 'drug', 'prescription', 'lab',
-                        'diagnostic', 'test', 'checkup', 'consultation', 'treatment',
-                        'dental', 'eye care', 'surgery'
-                    ],
-                    weight: 1
-                },
-                education: {
-                    keywords: [
-                        'school', 'college', 'university', 'education', 'course',
-                        'class', 'tuition', 'fee', 'book', 'stationery', 'library',
-                        'exam', 'study', 'learning', 'training', 'workshop'
-                    ],
-                    weight: 1
-                },
-                salary: {
-                    keywords: [
-                        'salary', 'wage', 'payroll', 'payment advice', 'pay slip',
-                        'earnings', 'gross pay', 'net pay', 'compensation'
-                    ],
-                    weight: 1
-                },
-                freelance: {
-                    keywords: [
-                        'freelance', 'contract', 'project payment', 'invoice',
-                        'consultation fee', 'service charge', 'professional fee',
-                        'gig', 'upwork', 'fiverr', 'freelancer'
-                    ],
-                    weight: 1
-                },
-                investment: {
-                    keywords: [
-                        'dividend', 'interest', 'investment', 'stock', 'mutual fund',
-                        'returns', 'profit', 'capital gain', 'trading', 'portfolio'
-                    ],
-                    weight: 1
-                },
-            };
-            
-            console.log('🏷️  Analyzing category...');
-            
-            for (const [cat, config] of Object.entries(categoryPatterns)) {
-                let score = 0;
-                config.keywords.forEach(keyword => {
-                    if (fullText.includes(keyword.toLowerCase())) {
-                        score += config.weight;
-                    }
-                });
-                
-                if (score > categoryConfidence) {
-                    categoryConfidence = score;
-                    category = cat;
-                }
-            }
-            
-            // Adjust category based on transaction type
-            if (transactionType === 'income') {
-                const incomeCategories = ['salary', 'freelance', 'investment', 'other'];
-                if (!incomeCategories.includes(category)) {
-                    category = 'salary'; // Default income category
-                }
-            }
-            
-            console.log('📂 Detected Category:', category.toUpperCase());
-            console.log('   Confidence Score:', categoryConfidence);
-            
-            // ============ EXTRACT MERCHANT/TITLE ============
-            let title = 'Scanned Receipt';
-            
-            // Try to find merchant name (usually first few lines)
-            for (let i = 0; i < Math.min(5, lines.length); i++) {
-                const line = lines[i];
-                // Look for lines with letters, not too long, no amounts
-                if (line.length > 3 && 
-                    line.length < 50 &&
-                    /[a-zA-Z]/.test(line) &&
-                    !amountKeywords.some(kw => line.toLowerCase().includes(kw)) &&
-                    !/^\d+[.,]\d{2}$/.test(line) &&
-                    !/^\d{2}\/\d{2}/.test(line)) {
-                    
-                    title = line.substring(0, 30);
-                    console.log('🏪 Merchant/Title:', title);
-                    break;
-                }
-            }
-            
-            // ============ EXTRACT DATE (Optional) ============
-            let date = new Date().toISOString();
-            const datePattern = /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/;
-            const dateMatch = text.match(datePattern);
-            if (dateMatch) {
-                console.log('📅 Found date on receipt:', dateMatch[0]);
-            }
-            
-            console.log('🎯 ========== ANALYSIS COMPLETE ==========');
-            
-            setLoading(false);
-            
-            // Show confirmation dialog with extracted data
-            Alert.alert(
-                '✅ Receipt Scanned Successfully',
-                `Type: ${transactionType === 'income' ? '💰 Income' : '💸 Expense'}\n` +
-                `Amount: Rs. ${amount || 'Not found'}\n` +
-                `Category: ${category}\n` +
-                `From: ${title}\n\n` +
-                `Confidence: ${categoryConfidence > 2 ? 'High' : categoryConfidence > 0 ? 'Medium' : 'Low'}`,
-                [
-                    {
-                        text: 'Edit',
-                        onPress: () => navigateToAddTransaction(amount, title, category, transactionType, text, true)
-                    },
-                    {
-                        text: 'Confirm',
-                        onPress: () => navigateToAddTransaction(amount, title, category, transactionType, text, false)
-                    }
+                    *CRITICAL*: Look at the ITEMS purchased to decide the category. 
+                    - Rice, Veggies, Burger -> food
+                    - Petrol, Uber -> transport
+                    - Clothes, Shoes -> shopping
+                    - Panadol, Asiri Hospital -> health
+                    - Dialog, SLT, Bill -> utilities
+
+                    Return ONLY raw JSON.` },
+                    { inline_data: { mime_type: "image/jpeg", data: base64 } }
                 ]
-            );
+            }]
+        };
 
-        } catch (err) {
-            console.error("Smart parsing error:", err);
-            setLoading(false);
-            Alert.alert('Error', 'Failed to analyze receipt. Please try manual entry.');
+        // Try getting available models first if we suspect version issues, 
+        // but for speed we try the likely valid one first.
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${PRIMARY_GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+        
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+            throw new Error(result.error.message); // Trigger fallback
         }
+
+        const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!rawText) throw new Error("No text returned from AI");
+
+        const jsonString = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+        const data = JSON.parse(jsonString);
+        
+        finishScan(data, 'Gemini AI');
     };
 
-    const navigateToAddTransaction = (amount, title, category, type, rawText, shouldEdit) => {
-        navigation.navigate("Transactions", {
-            screen: "AddTransaction",
-            params: {
-                amount: amount || '',
-                title: title || 'Scanned Receipt',
-                category: category || 'other',
-                type: type || 'expense',
-                note: `📸 Auto-scanned receipt\n\n${rawText.substring(0, 200)}${rawText.length > 200 ? '...' : ''}`,
-            },
+    // ==========================================
+    // 🛡️ METHOD 2: OCR.SPACE (Backup)
+    // ==========================================
+    const processWithOCRSpace = async (base64) => {
+        const formData = new FormData();
+        formData.append('base64Image', `data:image/jpeg;base64,${base64}`);
+        formData.append('language', 'eng');
+        formData.append('isOverlayRequired', 'false');
+        formData.append('OCREngine', '2'); // Better for receipts
+
+        const response = await fetch('https://api.ocr.space/parse/image', {
+            method: 'POST',
+            headers: { 'apikey': OCR_SPACE_API_KEY },
+            body: formData,
         });
+
+        const data = await response.json();
+        if (!data.ParsedResults?.length) throw new Error("OCR Failed");
+        
+        const text = data.ParsedResults[0].ParsedText;
+        const parsedData = parseTextLocally(text);
+        
+        finishScan(parsedData, 'OCR Engine');
+    };
+
+    // 🤖 Local Smart Parser (For Backup)
+    const parseTextLocally = (text) => {
+        const lines = text.split(/\r?\n/);
+        const lowerText = text.toLowerCase();
+        
+        // 1. Merchant
+        let merchant = "Unknown Store";
+        // Common Sri Lankan merchants
+        if (lowerText.includes('keells')) merchant = "Keells";
+        else if (lowerText.includes('cargills')) merchant = "Cargills Food City";
+        else if (lowerText.includes('pickme')) merchant = "PickMe";
+        else if (lowerText.includes('uber')) merchant = "Uber";
+        else if (lowerText.includes('pizza hut')) merchant = "Pizza Hut";
+        else if (lowerText.includes('kfc')) merchant = "KFC";
+        else if (lines.length > 0) merchant = lines[0].substring(0, 20); // Fallback to first line
+
+        // 2. Amount
+        let amount = 0;
+        // Regex for LKR currency formats
+        const amountRegex = /(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/g;
+        const potentialAmounts = text.match(amountRegex) || [];
+        if (potentialAmounts.length > 0) {
+            // Convert to numbers and find the largest one (usually the total)
+            const numbers = potentialAmounts.map(n => parseFloat(n.replace(/,/g, ''))).filter(n => !isNaN(n));
+            amount = Math.max(...numbers);
+        }
+
+        // 3. Category
+        let category = 'other';
+        const keywords = {
+            food: ['restaurant', 'cafe', 'rice', 'bakery', 'tea', 'keells', 'cargills', 'kfc', 'pizza', 'burger'],
+            transport: ['fuel', 'petrol', 'uber', 'pickme', 'taxi', 'highway'],
+            utilities: ['dialog', 'slt', 'mobitel', 'electricity', 'water', 'bill'],
+            health: ['pharmacy', 'hospital', 'doctor', 'lab'],
+            shopping: ['clothing', 'fashion', 'shoes', 'store']
+        };
+
+        for (const [cat, words] of Object.entries(keywords)) {
+            if (words.some(w => lowerText.includes(w))) {
+                category = cat;
+                break;
+            }
+        }
+
+        return { merchant, amount, category, date: new Date().toISOString().split('T')[0] };
+    };
+
+    const finishScan = (data, source) => {
+        Vibration.vibrate(50);
+        setLoading(false);
+
+        Alert.alert(
+            `Receipt Scanned (${source})`,
+            `Merchant: ${data.merchant || 'Unknown'}\nAmount: Rs. ${data.amount || 0}\nCategory: ${data.category || 'other'}`,
+            [
+                { text: 'Retake', style: 'cancel', onPress: () => setPreviewImage(null) },
+                {
+                    text: 'Save',
+                    onPress: () => {
+                        navigation.navigate("Transactions", {
+                            screen: "AddTransaction",
+                            params: {
+                                amount: data.amount ? data.amount.toString() : '',
+                                title: data.merchant || 'Scanned Receipt',
+                                category: data.category?.toLowerCase() || 'other',
+                                type: 'expense',
+                                note: `Scanned via ${source} on ${data.date || 'Today'}`,
+                            },
+                        });
+                        setPreviewImage(null);
+                    }
+                }
+            ]
+        );
     };
 
     if (loading) {
         return (
-            <View style={styles.container}>
+            <View style={styles.loadingContainer}>
+                <StatusBar barStyle="light-content" />
                 {previewImage && (
-                    <Image source={{ uri: previewImage }} style={styles.previewImage} />
+                    <Image source={{ uri: previewImage }} style={styles.loadingBg} blurRadius={20} />
                 )}
-                <ActivityIndicator size="large" color={theme.colors.primary} style={{ marginTop: 20 }} />
-                <Text style={styles.debugText}>{debugInfo}</Text>
-                <View style={styles.loadingSteps}>
-                    <Text style={styles.stepText}>🔍 Reading text...</Text>
-                    <Text style={styles.stepText}>💰 Extracting amount...</Text>
-                    <Text style={styles.stepText}>🏷️  Detecting category...</Text>
-                    <Text style={styles.stepText}>🎯 Analyzing type...</Text>
+                <View style={styles.loadingOverlay}>
+                    <ActivityIndicator size="large" color={theme.colors.primary} />
+                    <Text style={styles.loadingText}>{statusMessage}</Text>
+                    <Text style={styles.loadingSubText}>This may take a few seconds...</Text>
                 </View>
             </View>
         );
     }
 
     return (
-        <View style={styles.container}>
-            <View style={styles.iconContainer}>
-                <Ionicons name="scan-circle-outline" size={120} color={theme.colors.primary} />
-            </View>
+        <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+            <StatusBar barStyle="light-content" />
             
-            <Text style={styles.title}>AI Receipt Scanner</Text>
-            <Text style={styles.subtitle}>
-                Automatically detect amount, category, and transaction type from your receipts
-            </Text>
+            <AnimatedView index={0}>
+                <View style={styles.header}>
+                    <Text style={styles.headerTitle}>Smart Scanner</Text>
+                    <Text style={styles.headerSubtitle}>Powered by Gemini 2.5 & OCR</Text>
+                </View>
+            </AnimatedView>
 
-            <View style={styles.featuresContainer}>
-                <View style={styles.featureItem}>
-                    <Ionicons name="checkmark-circle" size={20} color={theme.colors.success} />
-                    <Text style={styles.featureText}>Auto-detect expense/income</Text>
+            <AnimatedView index={1}>
+                <View style={styles.scannerContainer}>
+                    <LinearGradient
+                        colors={[theme.colors.surface, theme.colors.surface_light]}
+                        style={styles.scannerCircle}
+                    >
+                        <Ionicons name="scan" size={60} color={theme.colors.primary} />
+                    </LinearGradient>
+                    <View style={styles.laserLine} />
                 </View>
-                <View style={styles.featureItem}>
-                    <Ionicons name="checkmark-circle" size={20} color={theme.colors.success} />
-                    <Text style={styles.featureText}>Smart category recognition</Text>
-                </View>
-                <View style={styles.featureItem}>
-                    <Ionicons name="checkmark-circle" size={20} color={theme.colors.success} />
-                    <Text style={styles.featureText}>Instant amount extraction</Text>
-                </View>
-            </View>
+            </AnimatedView>
 
-            <View style={styles.buttonContainer}>
-                <CustomButton 
-                    title="📷 Take Photo" 
-                    onPress={handleTakePhoto} 
-                    variant="primary" 
-                    style={styles.button}
-                />
-                <CustomButton 
-                    title="🖼️  Choose Photo" 
-                    onPress={handleChooseFromGallery} 
-                    variant="secondary" 
-                    style={styles.button}
-                />
-            </View>
-            
-            <Text style={styles.footerText}>Powered by AI OCR Technology</Text>
-        </View>
+            <AnimatedView index={2}>
+                <Text style={styles.sectionTitle}>Capture Receipt</Text>
+                <View style={styles.actionsRow}>
+                    <TouchableOpacity style={styles.actionCard} onPress={handleCamera} activeOpacity={0.8}>
+                        <LinearGradient
+                            colors={[theme.colors.primary_dark, theme.colors.primary]}
+                            style={styles.actionGradient}
+                        >
+                            <Ionicons name="camera" size={32} color="#fff" style={{ marginBottom: 10 }} />
+                            <Text style={styles.actionTitle}>Camera</Text>
+                            <Text style={styles.actionDesc}>Take photo</Text>
+                        </LinearGradient>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity style={styles.actionCard} onPress={handleGallery} activeOpacity={0.8}>
+                        <LinearGradient
+                            colors={[theme.colors.surface_light, theme.colors.surface]}
+                            style={styles.actionGradient}
+                        >
+                            <Ionicons name="images" size={32} color={theme.colors.primary} style={{ marginBottom: 10 }} />
+                            <Text style={styles.actionTitle}>Gallery</Text>
+                            <Text style={[styles.actionDesc, { color: theme.colors.text_secondary }]}>Upload file</Text>
+                        </LinearGradient>
+                    </TouchableOpacity>
+                </View>
+            </AnimatedView>
+        </ScrollView>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: theme.spacing.lg,
         backgroundColor: theme.colors.background,
     },
-    iconContainer: {
-        marginBottom: theme.spacing.md,
+    scrollContent: {
+        padding: theme.spacing.lg,
+        paddingBottom: 40,
     },
-    title: {
-        fontSize: 28,
+    header: {
+        alignItems: 'center',
+        marginTop: 20,
+        marginBottom: 40,
+    },
+    headerTitle: {
+        fontSize: 32,
         fontWeight: 'bold',
         color: theme.colors.text_primary,
-        marginBottom: theme.spacing.sm,
-        textAlign: 'center',
     },
-    subtitle: {
-        fontSize: theme.fontSize.base,
+    headerSubtitle: {
+        fontSize: 16,
         color: theme.colors.text_secondary,
-        textAlign: 'center',
-        marginBottom: theme.spacing.xl,
-        paddingHorizontal: theme.spacing.md,
-        lineHeight: 22,
+        marginTop: 4,
     },
-    featuresContainer: {
-        width: '100%',
-        backgroundColor: theme.colors.surface,
-        borderRadius: theme.borderRadius.lg,
-        padding: theme.spacing.md,
-        marginBottom: theme.spacing.xl,
-    },
-    featureItem: {
-        flexDirection: 'row',
+    scannerContainer: {
         alignItems: 'center',
-        marginBottom: theme.spacing.sm,
-        gap: theme.spacing.sm,
+        marginBottom: 50,
+        position: 'relative',
     },
-    featureText: {
-        fontSize: theme.fontSize.sm,
-        color: theme.colors.text_secondary,
+    scannerCircle: {
+        width: 160,
+        height: 160,
+        borderRadius: 80,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: theme.colors.glass_border,
+        shadowColor: theme.colors.primary,
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.4,
+        shadowRadius: 20,
+        elevation: 10,
     },
-    buttonContainer: {
-        flexDirection: 'row',
-        gap: theme.spacing.md,
-        width: '100%',
+    laserLine: {
+        position: 'absolute',
+        width: 200,
+        height: 2,
+        backgroundColor: theme.colors.primary,
+        top: 80,
+        shadowColor: theme.colors.primary,
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 1,
+        shadowRadius: 8,
     },
-    button: {
-        flex: 1,
-    },
-    previewImage: {
-        width: 280,
-        height: 280,
-        borderRadius: theme.borderRadius.xl,
-        marginBottom: theme.spacing.lg,
-        resizeMode: 'contain',
-        borderWidth: 3,
-        borderColor: theme.colors.primary,
-    },
-    debugText: {
-        fontSize: theme.fontSize.lg,
+    sectionTitle: {
+        fontSize: 18,
         fontWeight: '600',
-        color: theme.colors.primary,
-        marginTop: theme.spacing.sm,
-        textAlign: 'center',
+        color: theme.colors.text_primary,
+        marginBottom: 16,
     },
-    loadingSteps: {
-        marginTop: theme.spacing.lg,
+    actionsRow: {
+        flexDirection: 'row',
+        gap: 16,
+        marginBottom: 30,
+    },
+    actionCard: {
+        flex: 1,
+        height: 140,
+        borderRadius: 20,
+        ...theme.shadow.md,
+    },
+    actionGradient: {
+        flex: 1,
+        borderRadius: 20,
+        padding: 16,
+        justifyContent: 'center',
         alignItems: 'center',
     },
-    stepText: {
-        fontSize: theme.fontSize.sm,
-        color: theme.colors.text_secondary,
-        marginVertical: 4,
+    actionTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: theme.colors.text_primary,
     },
-    footerText: {
-        marginTop: theme.spacing.xl,
-        color: theme.colors.gray[600],
-        fontSize: 11,
-        fontStyle: 'italic',
+    actionDesc: {
+        fontSize: 12,
+        color: 'rgba(255,255,255,0.7)',
+        marginTop: 2,
+    },
+    loadingContainer: {
+        flex: 1,
+        backgroundColor: '#000',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    loadingBg: {
+        ...StyleSheet.absoluteFillObject,
+        opacity: 0.3,
+    },
+    loadingOverlay: {
+        backgroundColor: 'rgba(30, 41, 59, 0.9)',
+        padding: 30,
+        borderRadius: 20,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: theme.colors.glass_border,
+    },
+    loadingText: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: theme.colors.text_primary,
+        marginTop: 16,
+    },
+    loadingSubText: {
+        fontSize: 13,
+        color: theme.colors.text_secondary,
+        marginTop: 6,
     }
 });
