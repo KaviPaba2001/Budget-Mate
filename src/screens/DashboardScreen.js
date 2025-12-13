@@ -1,3 +1,4 @@
+// src/screens/DashboardScreen.js - FIXED VERSION
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
@@ -5,6 +6,7 @@ import { useCallback, useState } from 'react';
 import {
     ActivityIndicator,
     Image,
+    RefreshControl,
     ScrollView,
     StatusBar,
     StyleSheet,
@@ -18,11 +20,13 @@ import BudgetCard from '../components/BudgetCard';
 import { useUser } from '../context/UserContext';
 import { getBudgets, getTransactions, seedDefaultBudgets } from '../services/firebaseService';
 import { theme } from '../styles/theme';
+import { formatDateForDisplay } from '../utils/dateHelpers'; // ✅ USING UTILITY
 
 export default function DashboardScreen({ navigation }) {
     const { userName, profileImage } = useUser();
     const [transactions, setTransactions] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false); // ✅ ADDED
     const [currentBalance, setCurrentBalance] = useState(0);
     const [monthlySpending, setMonthlySpending] = useState(0);
     const [monthlyIncome, setMonthlyIncome] = useState(0);
@@ -34,8 +38,11 @@ export default function DashboardScreen({ navigation }) {
         }, [])
     );
 
-    const loadData = async () => {
-        setLoading(true);
+    const loadData = async (isRefreshing = false) => {
+        if (!isRefreshing) {
+            setLoading(true);
+        }
+        
         try {
             const data = await getTransactions();
             setTransactions(data);
@@ -52,8 +59,17 @@ export default function DashboardScreen({ navigation }) {
             console.error('Error loading dashboard data:', error);
         } finally {
             setLoading(false);
+            if (isRefreshing) {
+                setRefreshing(false);
+            }
         }
     };
+
+    // ✅ ADDED: Pull to refresh handler
+    const onRefresh = useCallback(() => {
+        setRefreshing(true);
+        loadData(true);
+    }, []);
 
     const calculateFinancials = (data) => {
         const now = new Date();
@@ -68,23 +84,33 @@ export default function DashboardScreen({ navigation }) {
             const amount = transaction.amount || 0;
             totalBalance += amount;
 
+            // ✅ IMPROVED: Better date handling
             let transactionDate;
-            if (transaction.date) {
-                transactionDate = new Date(transaction.date);
-            } else if (transaction.createdAt?.toDate) {
-                transactionDate = transaction.createdAt.toDate();
-            } else {
-                transactionDate = new Date();
-            }
-
-            if (transactionDate.getMonth() === currentMonth && 
-                transactionDate.getFullYear() === currentYear) {
-                
-                if (amount < 0) {
-                    monthlyExp += Math.abs(amount);
+            try {
+                if (transaction.date) {
+                    transactionDate = new Date(transaction.date);
+                } else if (transaction.createdAt?.toDate) {
+                    transactionDate = transaction.createdAt.toDate();
                 } else {
-                    monthlyInc += amount;
+                    transactionDate = new Date();
                 }
+
+                // Validate date
+                if (isNaN(transactionDate.getTime())) {
+                    transactionDate = new Date();
+                }
+
+                if (transactionDate.getMonth() === currentMonth && 
+                    transactionDate.getFullYear() === currentYear) {
+                    
+                    if (amount < 0) {
+                        monthlyExp += Math.abs(amount);
+                    } else {
+                        monthlyInc += amount;
+                    }
+                }
+            } catch (error) {
+                console.error('Error processing transaction date:', error);
             }
         });
 
@@ -93,15 +119,7 @@ export default function DashboardScreen({ navigation }) {
         setMonthlyIncome(monthlyInc);
     };
 
-    const formatDate = (date) => {
-        if (!date) return 'Unknown date';
-        const d = typeof date === 'string' ? new Date(date) : date;
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-    };
-
+    // ✅ IMPROVED: Using utility function
     const recentTransactions = transactions
         .sort((a, b) => {
             const dateA = a.date ? new Date(a.date) : (a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0));
@@ -111,16 +129,28 @@ export default function DashboardScreen({ navigation }) {
         .slice(0, 4)
         .map(transaction => ({
             id: transaction.id,
-            title: transaction.title,
-            amount: transaction.amount,
-            category: transaction.category,
-            date: formatDate(transaction.date || transaction.createdAt?.toDate()),
+            title: transaction.title || 'Untitled',
+            amount: transaction.amount || 0,
+            category: transaction.category || 'other',
+            date: formatDateForDisplay(transaction.date || transaction.createdAt),
         }));
 
     const quickActions = [
-        { icon: 'add-circle', title: 'Add', action: () => navigation.navigate('Transactions', { screen: 'AddTransaction' }) },
-        { icon: 'camera', title: 'Scan', action: () => navigation.navigate('Transactions', { screen: 'ScanReceipt' }) },
-        { icon: 'analytics', title: 'Reports', action: () => navigation.navigate('Reports') },
+        { 
+            icon: 'add-circle', 
+            title: 'Add', 
+            action: () => navigation.navigate('Transactions', { screen: 'AddTransaction' }) 
+        },
+        { 
+            icon: 'camera', 
+            title: 'Scan', 
+            action: () => navigation.navigate('Transactions', { screen: 'ScanReceipt' }) 
+        },
+        { 
+            icon: 'analytics', 
+            title: 'Reports', 
+            action: () => navigation.navigate('Reports') 
+        },
     ];
 
     const handleQuickActionPress = (action) => {
@@ -138,7 +168,18 @@ export default function DashboardScreen({ navigation }) {
     }
 
     return (
-        <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+        <ScrollView 
+            style={styles.container} 
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+                <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={onRefresh}
+                    tintColor={theme.colors.primary}
+                    colors={[theme.colors.primary]}
+                />
+            }
+        >
             <StatusBar barStyle="light-content" />
             
             <AnimatedView index={0}>
@@ -149,7 +190,11 @@ export default function DashboardScreen({ navigation }) {
                     </View>
                     <TouchableOpacity onPress={() => navigation.navigate('Settings')}>
                         <Image
-                            source={profileImage ? { uri: profileImage } : { uri: 'https://placehold.co/100x100/1f2937/f9fafb?text=U' }}
+                            source={
+                                profileImage 
+                                    ? { uri: profileImage } 
+                                    : { uri: 'https://placehold.co/100x100/1f2937/f9fafb?text=U' }
+                            }
                             style={styles.avatar}
                         />
                     </TouchableOpacity>
@@ -163,7 +208,10 @@ export default function DashboardScreen({ navigation }) {
                         styles.balanceAmount,
                         { color: currentBalance >= 0 ? theme.colors.white : theme.colors.danger }
                     ]}>
-                        Rs. {currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        Rs. {currentBalance.toLocaleString(undefined, { 
+                            minimumFractionDigits: 2, 
+                            maximumFractionDigits: 2 
+                        })}
                     </Text>
                     <View style={styles.balanceDetails}>
                         <View>
@@ -183,9 +231,13 @@ export default function DashboardScreen({ navigation }) {
             </AnimatedView>
 
             <AnimatedView index={2}>
-                 <View style={styles.section}>
+                <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Quick Actions</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickActionsContainer}>
+                    <ScrollView 
+                        horizontal 
+                        showsHorizontalScrollIndicator={false} 
+                        contentContainerStyle={styles.quickActionsContainer}
+                    >
                         {quickActions.map((action) => (
                             <AnimatedPressable
                                 key={action.title}
@@ -231,8 +283,12 @@ export default function DashboardScreen({ navigation }) {
                                     />
                                 </View>
                                 <View style={styles.transactionDetails}>
-                                    <Text style={styles.transactionTitle}>{transaction.title}</Text>
-                                    <Text style={styles.transactionCategory}>{transaction.category}</Text>
+                                    <Text style={styles.transactionTitle} numberOfLines={1}>
+                                        {transaction.title}
+                                    </Text>
+                                    <Text style={styles.transactionCategory} numberOfLines={1}>
+                                        {transaction.category}
+                                    </Text>
                                 </View>
                                 <View style={styles.transactionAmount}>
                                     <Text style={[
@@ -261,36 +317,177 @@ export default function DashboardScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: theme.colors.background },
-    centerContent: { justifyContent: 'center', alignItems: 'center' },
-    loadingText: { marginTop: theme.spacing.md, fontSize: theme.fontSize.base, color: theme.colors.text_secondary },
-    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: theme.spacing.md, paddingTop: theme.spacing.lg, paddingBottom: theme.spacing.sm },
-    headerWelcome: { fontSize: theme.fontSize.base, color: theme.colors.text_secondary },
-    headerUser: { fontSize: theme.fontSize['2xl'], color: theme.colors.text_primary, fontWeight: 'bold' },
-    avatar: { width: 50, height: 50, borderRadius: 25 },
-    balanceCard: { backgroundColor: theme.colors.primary, marginHorizontal: theme.spacing.md, padding: theme.spacing.lg, borderRadius: theme.borderRadius.xl },
-    balanceLabel: { color: 'rgba(255, 255, 255, 0.8)', fontSize: theme.fontSize.base, marginBottom: theme.spacing.sm },
-    balanceAmount: { color: theme.colors.white, fontSize: 36, fontWeight: 'bold' },
-    balanceDetails: { flexDirection: 'row', justifyContent: 'space-between', marginTop: theme.spacing.md, paddingTop: theme.spacing.md, borderTopWidth: 1, borderTopColor: 'rgba(255, 255, 255, 0.2)' },
-    balanceDetailLabel: { color: 'rgba(255, 255, 255, 0.7)', fontSize: theme.fontSize.sm, marginBottom: 4 },
-    balanceDetailAmount: { color: theme.colors.white, fontSize: theme.fontSize.base, fontWeight: '600' },
-    section: { marginTop: theme.spacing.xl, paddingHorizontal: theme.spacing.md },
-    sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: theme.spacing.md },
-    sectionTitle: { fontSize: theme.fontSize.lg, fontWeight: 'bold', color: theme.colors.text_primary },
-    seeAllText: { color: theme.colors.primary, fontSize: theme.fontSize.base, fontWeight: '600' },
-    quickActionsContainer: { paddingVertical: theme.spacing.sm },
-    quickActionItem: { alignItems: 'center', marginRight: theme.spacing.lg },
-    quickActionIcon: { width: 60, height: 60, borderRadius: 30, backgroundColor: theme.colors.surface, justifyContent: 'center', alignItems: 'center', marginBottom: theme.spacing.sm },
-    quickActionText: { fontSize: theme.fontSize.sm, color: theme.colors.text_secondary, fontWeight: '500' },
-    transactionItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: theme.colors.surface, padding: theme.spacing.md, borderRadius: theme.borderRadius.lg, marginBottom: theme.spacing.sm },
-    transactionIcon: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center', marginRight: theme.spacing.md },
-    transactionDetails: { flex: 1 },
-    transactionTitle: { fontSize: theme.fontSize.base, fontWeight: '600', color: theme.colors.text_primary },
-    transactionCategory: { fontSize: theme.fontSize.sm, color: theme.colors.text_secondary, textTransform: 'capitalize' },
-    transactionAmount: { alignItems: 'flex-end' },
-    transactionAmountText: { fontSize: theme.fontSize.base, fontWeight: 'bold' },
-    transactionDate: { fontSize: theme.fontSize.sm, color: theme.colors.text_secondary },
-    emptyTransactions: { alignItems: 'center', padding: theme.spacing.xl, backgroundColor: theme.colors.surface, borderRadius: theme.borderRadius.lg },
-    emptyText: { fontSize: theme.fontSize.base, color: theme.colors.text_secondary, marginTop: theme.spacing.sm },
-    addFirstText: { fontSize: theme.fontSize.base, color: theme.colors.primary, marginTop: theme.spacing.sm, fontWeight: '600' },
+    container: { 
+        flex: 1, 
+        backgroundColor: theme.colors.background 
+    },
+    centerContent: { 
+        justifyContent: 'center', 
+        alignItems: 'center' 
+    },
+    loadingText: { 
+        marginTop: theme.spacing.md, 
+        fontSize: theme.fontSize.base, 
+        color: theme.colors.text_secondary 
+    },
+    header: { 
+        flexDirection: 'row', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        paddingHorizontal: theme.spacing.md, 
+        paddingTop: theme.spacing.lg, 
+        paddingBottom: theme.spacing.sm 
+    },
+    headerWelcome: { 
+        fontSize: theme.fontSize.base, 
+        color: theme.colors.text_secondary 
+    },
+    headerUser: { 
+        fontSize: theme.fontSize['2xl'], 
+        color: theme.colors.text_primary, 
+        fontWeight: 'bold' 
+    },
+    avatar: { 
+        width: 50, 
+        height: 50, 
+        borderRadius: 25,
+        borderWidth: 2,
+        borderColor: theme.colors.primary,
+    },
+    balanceCard: { 
+        backgroundColor: theme.colors.primary, 
+        marginHorizontal: theme.spacing.md, 
+        padding: theme.spacing.lg, 
+        borderRadius: theme.borderRadius.xl,
+        ...theme.shadow.md,
+    },
+    balanceLabel: { 
+        color: 'rgba(255, 255, 255, 0.8)', 
+        fontSize: theme.fontSize.base, 
+        marginBottom: theme.spacing.sm 
+    },
+    balanceAmount: { 
+        fontSize: 36, 
+        fontWeight: 'bold' 
+    },
+    balanceDetails: { 
+        flexDirection: 'row', 
+        justifyContent: 'space-between', 
+        marginTop: theme.spacing.md, 
+        paddingTop: theme.spacing.md, 
+        borderTopWidth: 1, 
+        borderTopColor: 'rgba(255, 255, 255, 0.2)' 
+    },
+    balanceDetailLabel: { 
+        color: 'rgba(255, 255, 255, 0.7)', 
+        fontSize: theme.fontSize.sm, 
+        marginBottom: 4 
+    },
+    balanceDetailAmount: { 
+        color: theme.colors.white, 
+        fontSize: theme.fontSize.base, 
+        fontWeight: '600' 
+    },
+    section: { 
+        marginTop: theme.spacing.xl, 
+        paddingHorizontal: theme.spacing.md 
+    },
+    sectionHeader: { 
+        flexDirection: 'row', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        marginBottom: theme.spacing.md 
+    },
+    sectionTitle: { 
+        fontSize: theme.fontSize.lg, 
+        fontWeight: 'bold', 
+        color: theme.colors.text_primary 
+    },
+    seeAllText: { 
+        color: theme.colors.primary, 
+        fontSize: theme.fontSize.base, 
+        fontWeight: '600' 
+    },
+    quickActionsContainer: { 
+        paddingVertical: theme.spacing.sm 
+    },
+    quickActionItem: { 
+        alignItems: 'center', 
+        marginRight: theme.spacing.lg 
+    },
+    quickActionIcon: { 
+        width: 60, 
+        height: 60, 
+        borderRadius: 30, 
+        backgroundColor: theme.colors.surface, 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        marginBottom: theme.spacing.sm,
+        ...theme.shadow.sm,
+    },
+    quickActionText: { 
+        fontSize: theme.fontSize.sm, 
+        color: theme.colors.text_secondary, 
+        fontWeight: '500' 
+    },
+    transactionItem: { 
+        flexDirection: 'row', 
+        alignItems: 'center', 
+        backgroundColor: theme.colors.surface, 
+        padding: theme.spacing.md, 
+        borderRadius: theme.borderRadius.lg, 
+        marginBottom: theme.spacing.sm,
+        ...theme.shadow.sm,
+    },
+    transactionIcon: { 
+        width: 40, 
+        height: 40, 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        marginRight: theme.spacing.md 
+    },
+    transactionDetails: { 
+        flex: 1,
+        marginRight: theme.spacing.sm,
+    },
+    transactionTitle: { 
+        fontSize: theme.fontSize.base, 
+        fontWeight: '600', 
+        color: theme.colors.text_primary,
+        marginBottom: 2,
+    },
+    transactionCategory: { 
+        fontSize: theme.fontSize.sm, 
+        color: theme.colors.text_secondary, 
+        textTransform: 'capitalize' 
+    },
+    transactionAmount: { 
+        alignItems: 'flex-end' 
+    },
+    transactionAmountText: { 
+        fontSize: theme.fontSize.base, 
+        fontWeight: 'bold',
+        marginBottom: 2,
+    },
+    transactionDate: { 
+        fontSize: theme.fontSize.sm, 
+        color: theme.colors.text_secondary 
+    },
+    emptyTransactions: { 
+        alignItems: 'center', 
+        padding: theme.spacing.xl, 
+        backgroundColor: theme.colors.surface, 
+        borderRadius: theme.borderRadius.lg 
+    },
+    emptyText: { 
+        fontSize: theme.fontSize.base, 
+        color: theme.colors.text_secondary, 
+        marginTop: theme.spacing.sm 
+    },
+    addFirstText: { 
+        fontSize: theme.fontSize.base, 
+        color: theme.colors.primary, 
+        marginTop: theme.spacing.sm, 
+        fontWeight: '600' 
+    },
 });

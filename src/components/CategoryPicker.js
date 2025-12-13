@@ -1,5 +1,6 @@
+// src/components/CategoryPicker.js - FIXED VERSION
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     FlatList,
     Modal,
@@ -15,6 +16,7 @@ import { theme } from '../styles/theme';
 export default function CategoryPicker({ selectedCategory, onSelectCategory, type = 'expense' }) {
     const [modalVisible, setModalVisible] = useState(false);
     const [customCategories, setCustomCategories] = useState([]);
+    const [loading, setLoading] = useState(false);
 
     // Static categories definitions
     const expenseCategories = useMemo(() => [
@@ -37,32 +39,15 @@ export default function CategoryPicker({ selectedCategory, onSelectCategory, typ
         { id: 'other', name: 'Other', icon: 'ellipsis-horizontal' },
     ], []);
 
-    // Combine base and custom categories
-    const categories = useMemo(() => {
-        const base = type === 'expense' ? expenseCategories : incomeCategories;
-        // Merge custom categories, ensuring no duplicates by ID
-        const combined = [...base];
-        customCategories.forEach(custom => {
-            if (!combined.some(c => c.id === custom.id)) {
-                combined.push(custom);
-            }
-        });
-        return combined;
-    }, [type, expenseCategories, incomeCategories, customCategories]);
-
-    // Load custom categories on mount so the initial value displays correctly
-    useEffect(() => {
-        if (type === 'expense') {
-            loadCustomCategories();
-        }
-    }, [type]);
-
-    const loadCustomCategories = async () => {
+    // ✅ FIXED: Load custom categories when type changes
+    const loadCustomCategories = useCallback(async () => {
+        if (type !== 'expense') return;
+        
+        setLoading(true);
         try {
             const budgets = await getBudgets();
             const newCustomCats = [];
             Object.keys(budgets).forEach(categoryId => {
-                // Check if it's already in base categories
                 const isBase = expenseCategories.some(cat => cat.id === categoryId);
                 if (!isBase) {
                     const categoryName = categoryId.charAt(0).toUpperCase() + categoryId.slice(1);
@@ -76,21 +61,60 @@ export default function CategoryPicker({ selectedCategory, onSelectCategory, typ
             setCustomCategories(newCustomCats);
         } catch (error) {
             console.error('Error loading custom categories:', error);
+            setCustomCategories([]);
+        } finally {
+            setLoading(false);
         }
-    };
+    }, [type, expenseCategories]);
 
-    const selectedCategoryData = categories.find(cat => cat.id === selectedCategory);
+    // ✅ FIXED: Added type as dependency
+    useEffect(() => {
+        loadCustomCategories();
+    }, [loadCustomCategories]);
 
-    const renderCategoryItem = ({ item }) => (
+    // Combine base and custom categories
+    const categories = useMemo(() => {
+        const base = type === 'expense' ? expenseCategories : incomeCategories;
+        const combined = [...base];
+        
+        // Merge custom categories, ensuring no duplicates by ID
+        customCategories.forEach(custom => {
+            if (!combined.some(c => c.id === custom.id)) {
+                combined.push(custom);
+            }
+        });
+        
+        return combined;
+    }, [type, expenseCategories, incomeCategories, customCategories]);
+
+    // ✅ FIXED: Better category data retrieval with fallback
+    const selectedCategoryData = useMemo(() => {
+        const found = categories.find(cat => cat.id === selectedCategory);
+        
+        // If not found but we have a selected category, create a temporary category object
+        if (!found && selectedCategory) {
+            return {
+                id: selectedCategory,
+                name: selectedCategory.charAt(0).toUpperCase() + selectedCategory.slice(1),
+                icon: 'ellipsis-horizontal'
+            };
+        }
+        
+        return found;
+    }, [categories, selectedCategory]);
+
+    const handleSelectCategory = useCallback((categoryId) => {
+        onSelectCategory(categoryId);
+        setModalVisible(false);
+    }, [onSelectCategory]);
+
+    const renderCategoryItem = useCallback(({ item }) => (
         <TouchableOpacity
             style={[
                 styles.categoryItem,
                 selectedCategory === item.id && styles.selectedCategoryItem,
             ]}
-            onPress={() => {
-                onSelectCategory(item.id);
-                setModalVisible(false);
-            }}
+            onPress={() => handleSelectCategory(item.id)}
             activeOpacity={0.7}
         >
             <View style={styles.categoryIcon}>
@@ -101,7 +125,7 @@ export default function CategoryPicker({ selectedCategory, onSelectCategory, typ
                 <Ionicons name="checkmark-circle" size={24} color={theme.colors.primary} />
             )}
         </TouchableOpacity>
-    );
+    ), [selectedCategory, handleSelectCategory]);
 
     return (
         <>
@@ -114,7 +138,11 @@ export default function CategoryPicker({ selectedCategory, onSelectCategory, typ
                     {selectedCategoryData ? (
                         <>
                             <View style={styles.selectedIcon}>
-                                <Ionicons name={selectedCategoryData.icon} size={20} color={theme.colors.primary} />
+                                <Ionicons 
+                                    name={selectedCategoryData.icon} 
+                                    size={20} 
+                                    color={theme.colors.primary} 
+                                />
                             </View>
                             <Text style={styles.selectedText}>{selectedCategoryData.name}</Text>
                         </>
@@ -144,24 +172,39 @@ export default function CategoryPicker({ selectedCategory, onSelectCategory, typ
                         <SafeAreaView style={styles.safeArea}>
                             {/* Header */}
                             <View style={styles.modalHeader}>
-                                <Text style={styles.modalTitle}>Select Category</Text>
+                                <Text style={styles.modalTitle}>
+                                    Select {type === 'expense' ? 'Expense' : 'Income'} Category
+                                </Text>
                                 <TouchableOpacity 
                                     onPress={() => setModalVisible(false)}
                                     style={styles.closeButton}
                                 >
-                                    <Ionicons name="close-circle" size={28} color={theme.colors.text_secondary} />
+                                    <Ionicons 
+                                        name="close-circle" 
+                                        size={28} 
+                                        color={theme.colors.text_secondary} 
+                                    />
                                 </TouchableOpacity>
                             </View>
                             
                             {/* Category List */}
-                            <FlatList
-                                data={categories}
-                                renderItem={renderCategoryItem}
-                                keyExtractor={(item) => item.id}
-                                style={styles.categoryList}
-                                showsVerticalScrollIndicator={true}
-                                contentContainerStyle={styles.categoryListContent}
-                            />
+                            {loading ? (
+                                <View style={styles.loadingContainer}>
+                                    <Text style={styles.loadingText}>Loading categories...</Text>
+                                </View>
+                            ) : (
+                                <FlatList
+                                    data={categories}
+                                    renderItem={renderCategoryItem}
+                                    keyExtractor={(item) => item.id}
+                                    style={styles.categoryList}
+                                    showsVerticalScrollIndicator={true}
+                                    contentContainerStyle={styles.categoryListContent}
+                                    initialNumToRender={10}
+                                    maxToRenderPerBatch={10}
+                                    windowSize={10}
+                                />
+                            )}
 
                             {/* Close Button */}
                             <TouchableOpacity 
@@ -245,6 +288,15 @@ const styles = StyleSheet.create({
     },
     closeButton: {
         padding: theme.spacing.xs,
+    },
+    loadingContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    loadingText: {
+        fontSize: theme.fontSize.base,
+        color: theme.colors.text_secondary,
     },
     categoryList: {
         flex: 1,

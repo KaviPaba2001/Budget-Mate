@@ -1,10 +1,18 @@
+// App.js - FINAL CORRECTED VERSION
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
-import { onAuthStateChanged, signOut } from 'firebase/auth'; // Import auth functions
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import React, { useEffect, useState } from 'react'; // ✅ CRITICAL FIX
+import {
+    ActivityIndicator,
+    Alert,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
+} from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { auth } from './firebase'; // Import your firebase auth instance
+import { auth } from './firebase';
 import { UserProvider } from './src/context/UserContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import EmailLoginScreen from './src/screens/EmailLoginScreen';
@@ -13,34 +21,81 @@ import RegisterScreen from './src/screens/RegisterScreen';
 
 const AuthStack = createStackNavigator();
 
+// Error Boundary Component
+class AppErrorBoundary extends React.Component {
+    constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null };
+    }
+
+    static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+    }
+
+    componentDidCatch(error, errorInfo) {
+        console.error('App Error:', error, errorInfo);
+    }
+
+    render() {
+        if (this.state.hasError) {
+            return (
+                <SafeAreaView style={styles.errorContainer}>
+                    <Text style={styles.errorText}>Something went wrong</Text>
+                    <Text style={styles.errorDetail}>
+                        {this.state.error?.message || 'Unknown error'}
+                    </Text>
+                    <TouchableOpacity 
+                        style={styles.errorButton}
+                        onPress={() => {
+                            this.setState({ hasError: false, error: null });
+                        }}
+                    >
+                        <Text style={styles.errorButtonText}>Retry</Text>
+                    </TouchableOpacity>
+                </SafeAreaView>
+            );
+        }
+
+        return this.props.children;
+    }
+}
+
 export default function App() {
     const [user, setUser] = useState(null);
     const [initializing, setInitializing] = useState(true);
 
-    // Listen for Firebase Auth state changes
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (authUser) => {
-            console.log('Auth State Changed:', authUser ? 'User Logged In' : 'User Logged Out');
-            setUser(authUser);
-            if (initializing) setInitializing(false);
-        });
+        const unsubscribe = onAuthStateChanged(
+            auth, 
+            (authUser) => {
+                console.log('Auth State:', authUser ? 'Logged In' : 'Logged Out');
+                setUser(authUser);
+                if (initializing) setInitializing(false);
+            },
+            (error) => {
+                console.error('Auth State Error:', error);
+                Alert.alert('Authentication Error', 'Please restart the app.');
+                if (initializing) setInitializing(false);
+            }
+        );
 
-        // Cleanup subscription on unmount
-        return unsubscribe;
-    }, []);
+        return () => {
+            console.log('Cleaning up auth listener');
+            unsubscribe();
+        };
+    }, [initializing]);
 
-    // Handle Logout - Actually sign out from Firebase
     const handleLogout = async () => {
         try {
+            console.log('Logging out user...');
             await signOut(auth);
-            // The onAuthStateChanged listener will automatically set user to null
-            // and the UI will switch to the AuthStack
+            console.log('Logout successful');
         } catch (error) {
-            console.error('Error signing out:', error);
+            console.error('Logout error:', error);
+            Alert.alert('Error', 'Failed to logout. Please try again.');
         }
     };
 
-    // Callback for login screens (optional since listener handles state)
     const handleLogin = () => {
         console.log("Login successful");
     };
@@ -50,7 +105,7 @@ export default function App() {
             <SafeAreaProvider>
                 <SafeAreaView style={styles.container}>
                     <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="large" color="#ffffff" />
+                        <ActivityIndicator size="large" color="#10b981" />
                     </View>
                 </SafeAreaView>
             </SafeAreaProvider>
@@ -58,29 +113,29 @@ export default function App() {
     }
 
     return (
-        <UserProvider>
-            <SafeAreaProvider>
-                <NavigationContainer>
-                    <SafeAreaView style={styles.container}>
-                        {user ? (
-                            // Show AppNavigator if user is logged in
-                            <AppNavigator onLogout={handleLogout} />
-                        ) : (
-                            // Show AuthStack if user is logged out
-                            <AuthStack.Navigator screenOptions={{ headerShown: false }}>
-                                <AuthStack.Screen name="Login">
-                                    {props => <LoginScreen {...props} onLogin={handleLogin} />}
-                                </AuthStack.Screen>
-                                <AuthStack.Screen name="EmailLogin">
-                                    {props => <EmailLoginScreen {...props} onLogin={handleLogin} />}
-                                </AuthStack.Screen>
-                                <AuthStack.Screen name="Register" component={RegisterScreen} />
-                            </AuthStack.Navigator>
-                        )}
-                    </SafeAreaView>
-                </NavigationContainer>
-            </SafeAreaProvider>
-        </UserProvider>
+        <AppErrorBoundary>
+            <UserProvider>
+                <SafeAreaProvider>
+                    <NavigationContainer>
+                        <SafeAreaView style={styles.container}>
+                            {user ? (
+                                <AppNavigator onLogout={handleLogout} />
+                            ) : (
+                                <AuthStack.Navigator screenOptions={{ headerShown: false }}>
+                                    <AuthStack.Screen name="Login">
+                                        {props => <LoginScreen {...props} onLogin={handleLogin} />}
+                                    </AuthStack.Screen>
+                                    <AuthStack.Screen name="EmailLogin">
+                                        {props => <EmailLoginScreen {...props} onLogin={handleLogin} />}
+                                    </AuthStack.Screen>
+                                    <AuthStack.Screen name="Register" component={RegisterScreen} />
+                                </AuthStack.Navigator>
+                            )}
+                        </SafeAreaView>
+                    </NavigationContainer>
+                </SafeAreaProvider>
+            </UserProvider>
+        </AppErrorBoundary>
     );
 }
 
@@ -94,5 +149,36 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         backgroundColor: '#111827',
+    },
+    errorContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#111827',
+        padding: 20,
+    },
+    errorText: {
+        fontSize: 18,
+        color: '#f9fafb',
+        marginBottom: 10,
+        textAlign: 'center',
+        fontWeight: 'bold',
+    },
+    errorDetail: {
+        fontSize: 14,
+        color: '#9ca3af',
+        marginBottom: 20,
+        textAlign: 'center',
+    },
+    errorButton: {
+        backgroundColor: '#10b981',
+        paddingHorizontal: 30,
+        paddingVertical: 12,
+        borderRadius: 8,
+    },
+    errorButtonText: {
+        color: '#ffffff',
+        fontSize: 16,
+        fontWeight: '600',
     },
 });
