@@ -1,66 +1,56 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer } from '@react-navigation/native';
-import { createStackNavigator } from '@react-navigation/stack'; // Import StackNavigator
+import { createStackNavigator } from '@react-navigation/stack';
+import { onAuthStateChanged, signOut } from 'firebase/auth'; // Import auth functions
 import { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { auth } from './firebase'; // Import your firebase auth instance
 import { UserProvider } from './src/context/UserContext';
 import AppNavigator from './src/navigation/AppNavigator';
-import EmailLoginScreen from './src/screens/EmailLoginScreen'; // Import EmailLoginScreen
+import EmailLoginScreen from './src/screens/EmailLoginScreen';
 import LoginScreen from './src/screens/LoginScreen';
-import RegisterScreen from './src/screens/RegisterScreen'; // Import RegisterScreen
+import RegisterScreen from './src/screens/RegisterScreen';
 
-const AuthStack = createStackNavigator(); // Create the stack
+const AuthStack = createStackNavigator();
 
 export default function App() {
-    const [isAuthenticated, setIsAuthenticated] = useState(false);
-    const [isLoading, setIsLoading] = useState(true);
+    const [user, setUser] = useState(null);
+    const [initializing, setInitializing] = useState(true);
 
-    const checkAuthStatus = async () => {
-        try {
-            const authStatus = await AsyncStorage.getItem('isAuthenticated');
-            if (authStatus === 'true') {
-                setIsAuthenticated(true);
-            }
-        } catch (error) {
-            console.error('Error checking auth status:', error);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-    
+    // Listen for Firebase Auth state changes
     useEffect(() => {
-        checkAuthStatus();
+        const unsubscribe = onAuthStateChanged(auth, (authUser) => {
+            console.log('Auth State Changed:', authUser ? 'User Logged In' : 'User Logged Out');
+            setUser(authUser);
+            if (initializing) setInitializing(false);
+        });
+
+        // Cleanup subscription on unmount
+        return unsubscribe;
     }, []);
 
-    const handleLogin = async () => {
-        try {
-            await AsyncStorage.setItem('isAuthenticated', 'true');
-            setIsAuthenticated(true);
-        } catch (error) {
-            console.error('Error saving auth status:', error);
-            setIsAuthenticated(true); // Fallback
-        }
-    };
-
+    // Handle Logout - Actually sign out from Firebase
     const handleLogout = async () => {
-        console.log('Logout initiated...');
         try {
-            await AsyncStorage.removeItem('isAuthenticated');
+            await signOut(auth);
+            // The onAuthStateChanged listener will automatically set user to null
+            // and the UI will switch to the AuthStack
         } catch (error) {
-            console.error('Error clearing auth data:', error);
+            console.error('Error signing out:', error);
         }
-        setIsAuthenticated(false);
-        console.log('User logged out, showing login screen');
     };
 
+    // Callback for login screens (optional since listener handles state)
+    const handleLogin = () => {
+        console.log("Login successful");
+    };
 
-    if (isLoading) {
+    if (initializing) {
         return (
             <SafeAreaProvider>
                 <SafeAreaView style={styles.container}>
                     <View style={styles.loadingContainer}>
-                        {/* Add loading spinner if needed */}
+                        <ActivityIndicator size="large" color="#ffffff" />
                     </View>
                 </SafeAreaView>
             </SafeAreaProvider>
@@ -72,10 +62,11 @@ export default function App() {
             <SafeAreaProvider>
                 <NavigationContainer>
                     <SafeAreaView style={styles.container}>
-                        {isAuthenticated ? (
+                        {user ? (
+                            // Show AppNavigator if user is logged in
                             <AppNavigator onLogout={handleLogout} />
                         ) : (
-                            // Render the Auth Stack when not authenticated
+                            // Show AuthStack if user is logged out
                             <AuthStack.Navigator screenOptions={{ headerShown: false }}>
                                 <AuthStack.Screen name="Login">
                                     {props => <LoginScreen {...props} onLogin={handleLogin} />}
@@ -102,5 +93,6 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
+        backgroundColor: '#111827',
     },
 });
