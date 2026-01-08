@@ -1,9 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
-// Legacy import to handle Expo SDK 52+ file system changes
-import * as FileSystem from 'expo-file-system/legacy';
 import { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -26,8 +25,8 @@ import { theme } from '../styles/theme';
 const GEMINI_API_KEY = 'AIzaSyCRdZJ9GvSXO_cR5oQigPqzd01mCfdiB0Y'; 
 const OCR_SPACE_API_KEY = 'K84979664988957'; 
 
-// Updated to use the latest stable model for 2025
-const PRIMARY_GEMINI_MODEL = 'gemini-2.5-flash';
+// ✅ FIX: Use the latest stable Flash model
+const PRIMARY_GEMINI_MODEL = 'gemini-1.5-flash-latest';
 
 export default function ScanReceiptScreen() {
     const navigation = useNavigation();
@@ -54,9 +53,11 @@ export default function ScanReceiptScreen() {
         try {
             const result = await ImagePicker.launchCameraAsync({
                 mediaTypes: ['images'],
-                quality: 0.6, // Balanced quality
+                // ✅ FIX: Lower quality to 0.3 to ensure API accepts the payload size
+                quality: 0.3,
                 allowsEditing: true,
                 aspect: [4, 6],
+                base64: true, // Request base64 directly if possible
             });
             if (!result.canceled) startScan(result.assets[0].uri);
         } catch (error) {
@@ -68,7 +69,7 @@ export default function ScanReceiptScreen() {
         try {
             const result = await ImagePicker.launchImageLibraryAsync({
                 mediaTypes: ['images'],
-                quality: 0.6,
+                quality: 0.3, // ✅ FIX: Lower quality for upload speed
                 allowsEditing: true,
             });
             if (!result.canceled) startScan(result.assets[0].uri);
@@ -83,10 +84,16 @@ export default function ScanReceiptScreen() {
         
         try {
             // Attempt 1: Try Gemini AI (Best Accuracy)
-            setStatusMessage('AI Analysis (Gemini 2.5)...');
+            setStatusMessage('AI Analysis (Gemini 1.5)...');
             await processWithGemini(uri);
         } catch (aiError) {
-            console.log("Gemini failed, switching to backup...", aiError.message);
+            // ✅ DEBUG: Log the exact error to console
+            console.error("Gemini Critical Failure:", aiError);
+            
+            Alert.alert(
+                "AI Scanner Error",
+                `The AI scanner failed: ${aiError.message}\n\nSwitching to basic scanner (Items will be unavailable).`
+            );
             
             // Attempt 2: Fallback to OCR.Space (Reliable Backup)
             try {
@@ -110,27 +117,28 @@ export default function ScanReceiptScreen() {
         const body = {
             contents: [{
                 parts: [
-                    { text: `You are an expert receipt scanner for Sri Lanka. Analyze this image and extract:
-                    - "merchant": Store name (e.g. Keells, Cargills, Uber, PickMe).
-                    - "amount": Total value (numeric only, ignore LKR/Rs).
-                    - "date": YYYY-MM-DD format.
-                    - "category": Choose strictly one from [food, transport, shopping, utilities, health, entertainment, education, salary, other].
-                    
-                    *CRITICAL*: Look at the ITEMS purchased to decide the category. 
-                    - Rice, Veggies, Burger -> food
-                    - Petrol, Uber -> transport
-                    - Clothes, Shoes -> shopping
-                    - Panadol, Asiri Hospital -> health
-                    - Dialog, SLT, Bill -> utilities
+                    { text: `Analyze this receipt image from Sri Lanka. Return a raw JSON object with these exact keys:
 
-                    Return ONLY raw JSON.` },
+                    {
+                        "merchant": "Store Name",
+                        "amount": 100.50,
+                        "date": "2024-01-01",
+                        "category": "food",
+                        "items": "Item 1, Item 2, Item 3",
+                        "discount": 0.00,
+                        "paymentMethod": "Cash"
+                    }
+
+                    Instructions:
+                    - "items": List specific products found in the receipt. If text is blurry, guess based on context.
+                    - "category": Choose one of [food, transport, shopping, utilities, health, entertainment, education, salary, other].
+                    - "discount": Numeric value only.
+                    - Do NOT use Markdown formatting (no \`\`\`). Return ONLY the JSON string.` },
                     { inline_data: { mime_type: "image/jpeg", data: base64 } }
                 ]
             }]
         };
 
-        // Try getting available models first if we suspect version issues, 
-        // but for speed we try the likely valid one first.
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${PRIMARY_GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
         
         const response = await fetch(url, {
@@ -141,15 +149,23 @@ export default function ScanReceiptScreen() {
 
         const result = await response.json();
 
+        // ✅ Check for API Errors explicitly
         if (result.error) {
-            throw new Error(result.error.message); // Trigger fallback
+            throw new Error(result.error.message || "Unknown Gemini API Error");
         }
 
         const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
         if (!rawText) throw new Error("No text returned from AI");
 
+        // Clean up markdown just in case
         const jsonString = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-        const data = JSON.parse(jsonString);
+        
+        let data;
+        try {
+            data = JSON.parse(jsonString);
+        } catch (e) {
+            throw new Error("Failed to parse AI response");
+        }
         
         finishScan(data, 'Gemini AI');
     };
@@ -162,7 +178,7 @@ export default function ScanReceiptScreen() {
         formData.append('base64Image', `data:image/jpeg;base64,${base64}`);
         formData.append('language', 'eng');
         formData.append('isOverlayRequired', 'false');
-        formData.append('OCREngine', '2'); // Better for receipts
+        formData.append('OCREngine', '2'); 
 
         const response = await fetch('https://api.ocr.space/parse/image', {
             method: 'POST',
@@ -184,51 +200,64 @@ export default function ScanReceiptScreen() {
         const lines = text.split(/\r?\n/);
         const lowerText = text.toLowerCase();
         
-        // 1. Merchant
         let merchant = "Unknown Store";
-        // Common Sri Lankan merchants
         if (lowerText.includes('keells')) merchant = "Keells";
         else if (lowerText.includes('cargills')) merchant = "Cargills Food City";
         else if (lowerText.includes('pickme')) merchant = "PickMe";
         else if (lowerText.includes('uber')) merchant = "Uber";
-        else if (lowerText.includes('pizza hut')) merchant = "Pizza Hut";
         else if (lowerText.includes('kfc')) merchant = "KFC";
-        else if (lines.length > 0) merchant = lines[0].substring(0, 20); // Fallback to first line
+        else if (lines.length > 0) merchant = lines[0].substring(0, 20);
 
-        // 2. Amount
         let amount = 0;
-        // Regex for LKR currency formats
         const amountRegex = /(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/g;
         const potentialAmounts = text.match(amountRegex) || [];
         if (potentialAmounts.length > 0) {
-            // Convert to numbers and find the largest one (usually the total)
             const numbers = potentialAmounts.map(n => parseFloat(n.replace(/,/g, ''))).filter(n => !isNaN(n));
             amount = Math.max(...numbers);
         }
 
-        // 3. Category
         let category = 'other';
-        const keywords = {
-            food: ['restaurant', 'cafe', 'rice', 'bakery', 'tea', 'keells', 'cargills', 'kfc', 'pizza', 'burger'],
-            transport: ['fuel', 'petrol', 'uber', 'pickme', 'taxi', 'highway'],
-            utilities: ['dialog', 'slt', 'mobitel', 'electricity', 'water', 'bill'],
-            health: ['pharmacy', 'hospital', 'doctor', 'lab'],
-            shopping: ['clothing', 'fashion', 'shoes', 'store']
+        if (lowerText.includes('rice') || lowerText.includes('food')) category = 'food';
+        if (lowerText.includes('uber') || lowerText.includes('fuel')) category = 'transport';
+
+        return { 
+            merchant, 
+            amount, 
+            category, 
+            date: new Date().toISOString().split('T')[0],
+            items: "Details unavailable (OCR Backup)", 
+            discount: 0, 
+            paymentMethod: "Unknown"
         };
-
-        for (const [cat, words] of Object.entries(keywords)) {
-            if (words.some(w => lowerText.includes(w))) {
-                category = cat;
-                break;
-            }
-        }
-
-        return { merchant, amount, category, date: new Date().toISOString().split('T')[0] };
     };
 
     const finishScan = (data, source) => {
         Vibration.vibrate(50);
         setLoading(false);
+
+        // 📝 Construct a detailed note
+        let detailedNote = "";
+        
+        // Items
+        if (data.items && data.items !== "Details unavailable (OCR Backup)") {
+            detailedNote += `🛒 Items: ${data.items}\n`;
+        } else {
+             // If items are missing, try to note that
+             detailedNote += `🛒 Items: Not extracted\n`;
+        }
+        
+        // Discount
+        if (data.discount && parseFloat(data.discount) > 0) {
+            detailedNote += `🏷️ Discount: Rs. ${data.discount}\n`;
+        }
+
+        // Payment
+        if (data.paymentMethod && data.paymentMethod !== 'Unknown') {
+            detailedNote += `💳 Payment: ${data.paymentMethod}\n`;
+        }
+
+        // Footer
+        detailedNote += `\n(Scanned via ${source} on ${data.date || 'Today'})`;
 
         Alert.alert(
             `Receipt Scanned (${source})`,
@@ -245,7 +274,7 @@ export default function ScanReceiptScreen() {
                                 title: data.merchant || 'Scanned Receipt',
                                 category: data.category?.toLowerCase() || 'other',
                                 type: 'expense',
-                                note: `Scanned via ${source} on ${data.date || 'Today'}`,
+                                note: detailedNote, // ✅ Pass the formatted note
                             },
                         });
                         setPreviewImage(null);
@@ -278,7 +307,7 @@ export default function ScanReceiptScreen() {
             <AnimatedView index={0}>
                 <View style={styles.header}>
                     <Text style={styles.headerTitle}>Smart Scanner</Text>
-                    <Text style={styles.headerSubtitle}>Powered by Gemini 2.5 & OCR</Text>
+                    <Text style={styles.headerSubtitle}>Powered by Gemini 1.5 & OCR</Text>
                 </View>
             </AnimatedView>
 

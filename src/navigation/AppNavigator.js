@@ -16,6 +16,8 @@ import ScanReceiptScreen from '../screens/ScanReceiptScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import TransactionDetailScreen from '../screens/TransactionDetailScreen';
 import TransactionsScreen from '../screens/TransactionsScreen';
+// Added SMS Screen Import
+import SMSTransactionsScreen from '../screens/SMSTransactionsScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -35,6 +37,8 @@ function TransactionsStack() {
             <Stack.Screen name="TransactionDetail" component={TransactionDetailScreen} options={{ title: 'Transaction Details' }} />
             <Stack.Screen name="AddTransaction" component={AddTransactionScreen} options={{ title: 'Add Transaction' }} />
             <Stack.Screen name="ScanReceipt" component={ScanReceiptScreen} options={{ title: 'Scan Receipt' }} />
+            {/* Added SMS Screen Route */}
+            <Stack.Screen name="SMSTransactions" component={SMSTransactionsScreen} options={{ title: 'SMS Transactions', headerShown: false }} />
         </Stack.Navigator>
     );
 }

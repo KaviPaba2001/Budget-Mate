@@ -1,4 +1,3 @@
-// src/screens/DashboardScreen.js - FIXED VERSION
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
@@ -20,13 +19,13 @@ import BudgetCard from '../components/BudgetCard';
 import { useUser } from '../context/UserContext';
 import { getBudgets, getTransactions, seedDefaultBudgets } from '../services/firebaseService';
 import { theme } from '../styles/theme';
-import { formatDateForDisplay } from '../utils/dateHelpers'; // ✅ USING UTILITY
+import { formatDateForDisplay } from '../utils/dateHelpers';
 
 export default function DashboardScreen({ navigation }) {
     const { userName, profileImage } = useUser();
     const [transactions, setTransactions] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [refreshing, setRefreshing] = useState(false); // ✅ ADDED
+    const [refreshing, setRefreshing] = useState(false);
     const [currentBalance, setCurrentBalance] = useState(0);
     const [monthlySpending, setMonthlySpending] = useState(0);
     const [monthlyIncome, setMonthlyIncome] = useState(0);
@@ -65,7 +64,6 @@ export default function DashboardScreen({ navigation }) {
         }
     };
 
-    // ✅ ADDED: Pull to refresh handler
     const onRefresh = useCallback(() => {
         setRefreshing(true);
         loadData(true);
@@ -84,7 +82,6 @@ export default function DashboardScreen({ navigation }) {
             const amount = transaction.amount || 0;
             totalBalance += amount;
 
-            // ✅ IMPROVED: Better date handling
             let transactionDate;
             try {
                 if (transaction.date) {
@@ -95,7 +92,6 @@ export default function DashboardScreen({ navigation }) {
                     transactionDate = new Date();
                 }
 
-                // Validate date
                 if (isNaN(transactionDate.getTime())) {
                     transactionDate = new Date();
                 }
@@ -119,7 +115,6 @@ export default function DashboardScreen({ navigation }) {
         setMonthlyIncome(monthlyInc);
     };
 
-    // ✅ IMPROVED: Using utility function
     const recentTransactions = transactions
         .sort((a, b) => {
             const dateA = a.date ? new Date(a.date) : (a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0));
@@ -145,6 +140,11 @@ export default function DashboardScreen({ navigation }) {
             icon: 'camera', 
             title: 'Scan', 
             action: () => navigation.navigate('Transactions', { screen: 'ScanReceipt' }) 
+        },
+        { 
+            icon: 'chatbubbles', 
+            title: 'Sync SMS', 
+            action: () => navigation.navigate('Transactions', { screen: 'SMSTransactions' }) 
         },
         { 
             icon: 'analytics', 
