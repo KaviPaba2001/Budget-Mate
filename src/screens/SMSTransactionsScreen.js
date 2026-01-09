@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
-import * as SMS from 'expo-sms';
 import { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
     FlatList,
+    PermissionsAndroid,
     Platform,
     RefreshControl,
     StyleSheet,
@@ -13,9 +13,9 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import SmsAndroid from 'react-native-get-sms-android';
 import AnimatedView from '../components/AnimatedView';
 import EmptyState from '../components/EmptyState';
-import { useUser } from '../context/UserContext';
 import { addTransaction } from '../services/firebaseService';
 import { theme } from '../styles/theme';
 
@@ -23,13 +23,94 @@ const mapBankToCategory = (bankName) => {
     const lowerBank = bankName.toLowerCase();
     if (lowerBank.includes('ceb') || lowerBank.includes('electricity')) return 'utilities';
     if (lowerBank.includes('water') || lowerBank.includes('nwsdb')) return 'utilities';
-    if (lowerBank.includes('food') || lowerBank.includes('restaurant')) return 'food';
+    if (lowerBank.includes('food') || lowerBank.includes('restaurant') || lowerBank.includes('keells')) return 'food';
     if (lowerBank.includes('transport') || lowerBank.includes('uber') || lowerBank.includes('pickme')) return 'transport';
+    if (lowerBank.includes('shopping') || lowerBank.includes('mall')) return 'shopping';
     return 'other';
 };
 
+// Parse SMS transaction details
+const parseSMSTransaction = (sms) => {
+    const body = sms.body || '';
+    const lowerBody = body.toLowerCase();
+    
+    // Extract bank name
+    let bankName = 'Unknown Bank';
+    if (lowerBody.includes('boc') || lowerBody.includes('bank of ceylon')) bankName = 'Bank of Ceylon';
+    else if (lowerBody.includes("people's bank") || lowerBody.includes('peoples bank')) bankName = "People's Bank";
+    else if (lowerBody.includes('commercial bank') || lowerBody.includes('combank')) bankName = 'Commercial Bank';
+    else if (lowerBody.includes('sampath')) bankName = 'Sampath Bank';
+    else if (lowerBody.includes('hnb') || lowerBody.includes('hatton')) bankName = 'HNB';
+    else if (lowerBody.includes('seylan')) bankName = 'Seylan Bank';
+    else if (lowerBody.includes('dfcc')) bankName = 'DFCC Bank';
+    else if (lowerBody.includes('nations trust') || lowerBody.includes('ntb')) bankName = 'Nations Trust Bank';
+    else if (lowerBody.includes('pan asia')) bankName = 'Pan Asia Bank';
+    else if (lowerBody.includes('union')) bankName = 'Union Bank';
+    
+    // Extract amount (supports formats like: Rs. 2,500.00, LKR 2500, 2,500.00)
+    const amountMatch = body.match(/(?:Rs\.?|LKR|රු)\s*([0-9,]+\.?\d*)/i);
+    const amount = amountMatch ? parseFloat(amountMatch[1].replace(/,/g, '')) : 0;
+    
+    // Determine transaction type (debit/credit)
+    const isDebit = lowerBody.includes('debit') || 
+                    lowerBody.includes('withdrawn') || 
+                    lowerBody.includes('paid') ||
+                    lowerBody.includes('purchase') ||
+                    lowerBody.includes('spent');
+    const isCredit = lowerBody.includes('credit') || 
+                     lowerBody.includes('deposit') || 
+                     lowerBody.includes('received') ||
+                     lowerBody.includes('credited');
+    
+    const type = isCredit ? 'credit' : (isDebit ? 'debit' : 'unknown');
+    
+    // Extract reason/description
+    let reason = 'Transaction';
+    if (lowerBody.includes('atm')) reason = 'ATM Withdrawal';
+    else if (lowerBody.includes('pos')) reason = 'POS Transaction';
+    else if (lowerBody.includes('online') || lowerBody.includes('internet')) reason = 'Online Transaction';
+    else if (lowerBody.includes('transfer')) reason = 'Transfer';
+    else if (lowerBody.includes('deposit')) reason = 'Deposit';
+    else if (lowerBody.includes('salary')) reason = 'Salary';
+    else if (lowerBody.includes('bill') || lowerBody.includes('payment')) reason = 'Bill Payment';
+    
+    return {
+        id: sms._id || String(Date.now() + Math.random()),
+        smsId: sms._id,
+        bankName,
+        amount,
+        currency: 'LKR',
+        type,
+        reason,
+        timestamp: sms.date || Date.now(),
+        body,
+    };
+};
+
+// Filter function to identify bank/financial SMS
+const isBankSMS = (sms) => {
+    const body = sms.body?.toLowerCase() || '';
+    const address = sms.address?.toLowerCase() || '';
+    
+    // Check if sender is a bank
+    const bankKeywords = [
+        'boc', 'bank', 'sampath', 'commercial', 'hnb', 'seylan', 
+        'peoples', 'dfcc', 'nations trust', 'ntb', 'pan asia'
+    ];
+    
+    // Check if message contains financial keywords
+    const financialKeywords = [
+        'debit', 'credit', 'withdraw', 'deposit', 'balance', 
+        'account', 'transaction', 'rs.', 'lkr', 'payment'
+    ];
+    
+    const hasBank = bankKeywords.some(keyword => body.includes(keyword) || address.includes(keyword));
+    const hasFinancial = financialKeywords.some(keyword => body.includes(keyword));
+    
+    return hasBank && hasFinancial;
+};
+
 export default function SMSTransactionsScreen({ navigation }) {
-    const { userName } = useUser();
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedFilter, setSelectedFilter] = useState('All');
     const [transactions, setTransactions] = useState([]);
@@ -41,87 +122,98 @@ export default function SMSTransactionsScreen({ navigation }) {
     const filters = ['All', 'Credit', 'Debit'];
 
     useEffect(() => {
-        checkPermissionsAndLoad();
+        requestSMSPermissions();
     }, []);
 
-    const checkPermissionsAndLoad = async () => {
-        if (Platform.OS === 'android') {
-            try {
-                const isAvailable = await SMS.isAvailableAsync();
-                
-                if (!isAvailable) {
-                    Alert.alert(
-                        'SMS Not Available',
-                        'SMS reading is not available on this device. This feature requires a bare React Native app.',
-                        [{ text: 'OK' }]
-                    );
-                    return;
-                }
+    const requestSMSPermissions = async () => {
+        if (Platform.OS !== 'android') {
+            Alert.alert(
+                'iOS Not Supported',
+                'SMS reading is only available on Android devices due to platform restrictions.',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
 
+        try {
+            const granted = await PermissionsAndroid.request(
+                PermissionsAndroid.PERMISSIONS.READ_SMS,
+                {
+                    title: 'SMS Permission Required',
+                    message: 'Finance Tracker needs access to read SMS messages to automatically detect bank transactions. Your privacy is protected - we only read bank/financial messages.',
+                    buttonNeutral: 'Ask Me Later',
+                    buttonNegative: 'Cancel',
+                    buttonPositive: 'Grant Access',
+                }
+            );
+
+            if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+                console.log('SMS permission granted');
                 setHasPermission(true);
-                
-                // Show demo data instead since Expo doesn't support reading SMS
+                loadSMSTransactions();
+            } else {
+                console.log('SMS permission denied');
                 Alert.alert(
-                    'Demo Mode',
-                    'SMS reading requires native permissions. Showing demo transactions.',
-                    [{ text: 'OK', onPress: loadDemoTransactions }]
+                    'Permission Required',
+                    'SMS reading permission is required to automatically detect bank transactions from your messages.',
+                    [{ text: 'OK' }]
                 );
-            } catch (error) {
-                console.error('Permission error:', error);
-                Alert.alert('Feature Unavailable', 'SMS reading is not available in Expo Go. Please use a development build.');
             }
+        } catch (error) {
+            console.error('Error requesting SMS permission:', error);
+            Alert.alert('Error', 'Failed to request SMS permissions.');
         }
     };
 
-    const loadDemoTransactions = () => {
+    const loadSMSTransactions = async () => {
         setLoading(true);
-        
-        // Demo transactions for testing UI
-        const demoTransactions = [
-            {
-                id: '1',
-                smsId: 'demo1',
-                bankName: 'Bank of Ceylon',
-                amount: 2500,
-                currency: 'LKR',
-                type: 'debit',
-                reason: 'POS Transaction',
-                timestamp: Date.now() - 3600000,
-                body: 'BOC Alert: Rs. 2,500.00 debited from A/C *1234 via POS at Keells on 09/01/2026 14:30. Avl Bal: Rs. 25,000.00'
-            },
-            {
-                id: '2',
-                smsId: 'demo2',
-                bankName: "People's Bank",
-                amount: 5000,
-                currency: 'LKR',
-                type: 'credit',
-                reason: 'Account Credit',
-                timestamp: Date.now() - 7200000,
-                body: "People's Bank: Your account *5678 has been CREDITED with LKR 5,000.00 on 09/01/2026. Balance: LKR 30,000.00"
-            },
-            {
-                id: '3',
-                smsId: 'demo3',
-                bankName: 'Commercial Bank',
-                amount: 1200,
-                currency: 'LKR',
-                type: 'debit',
-                reason: 'ATM Withdrawal',
-                timestamp: Date.now() - 86400000,
-                body: 'ComBank: ATM Withdrawal of LKR 1,200.00 from card ending 9012 on 08/01/2026 at 16:45. Available: LKR 28,800.00'
-            }
-        ];
-        
-        setTimeout(() => {
-            setTransactions(demoTransactions);
+        try {
+            // Read SMS from last 30 days
+            const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+            
+            const filter = {
+                box: 'inbox', // 'inbox' (default), 'sent', 'draft', 'outbox', 'failed', 'queued', and '' for all
+                minDate: thirtyDaysAgo,
+                maxCount: 100, // Limit to 100 most recent messages
+            };
+
+            SmsAndroid.list(
+                JSON.stringify(filter),
+                (fail) => {
+                    console.error('Failed to load SMS:', fail);
+                    Alert.alert('Error', 'Failed to read SMS messages. Please check permissions.');
+                    setLoading(false);
+                },
+                (count, smsList) => {
+                    console.log('SMS Count:', count);
+                    
+                    const messages = JSON.parse(smsList);
+                    
+                    // Filter only bank/financial SMS
+                    const bankMessages = messages.filter(isBankSMS);
+                    
+                    console.log(`Found ${bankMessages.length} bank messages out of ${messages.length} total`);
+                    
+                    // Parse transactions
+                    const parsedTransactions = bankMessages
+                        .map(parseSMSTransaction)
+                        .filter(t => t.amount > 0 && t.type !== 'unknown') // Only valid transactions
+                        .sort((a, b) => b.timestamp - a.timestamp); // Sort by date, newest first
+                    
+                    setTransactions(parsedTransactions);
+                    setLoading(false);
+                }
+            );
+        } catch (error) {
+            console.error('Error loading SMS:', error);
+            Alert.alert('Error', 'Failed to load SMS messages: ' + error.message);
             setLoading(false);
-        }, 1000);
+        }
     };
 
     const onRefresh = async () => {
         setRefreshing(true);
-        loadDemoTransactions();
+        await loadSMSTransactions();
         setRefreshing(false);
     };
 
@@ -138,12 +230,12 @@ export default function SMSTransactionsScreen({ navigation }) {
                 date: new Date(transaction.timestamp).toISOString(),
             });
 
-            Alert.alert('Success', 'Transaction imported!', [
+            Alert.alert('Success', 'Transaction imported successfully!', [
                 { text: 'OK', onPress: () => navigation.navigate('Dashboard') }
             ]);
         } catch (error) {
             console.error('Error importing transaction:', error);
-            Alert.alert('Error', 'Failed to import transaction.');
+            Alert.alert('Error', 'Failed to import transaction: ' + error.message);
         } finally {
             setImporting(false);
         }
@@ -151,8 +243,8 @@ export default function SMSTransactionsScreen({ navigation }) {
 
     const handleImportAll = async () => {
         Alert.alert(
-            'Import All',
-            `Import ${filteredTransactions.length} transactions?`,
+            'Import All Transactions',
+            `Import ${filteredTransactions.length} transaction${filteredTransactions.length !== 1 ? 's' : ''}?`,
             [
                 { text: 'Cancel', style: 'cancel' },
                 {
@@ -160,6 +252,8 @@ export default function SMSTransactionsScreen({ navigation }) {
                     onPress: async () => {
                         setImporting(true);
                         let successCount = 0;
+                        let failCount = 0;
+                        
                         for (const transaction of filteredTransactions) {
                             try {
                                 await addTransaction({
@@ -173,10 +267,19 @@ export default function SMSTransactionsScreen({ navigation }) {
                                 successCount++;
                             } catch (error) {
                                 console.error('Import error:', error);
+                                failCount++;
                             }
                         }
+                        
                         setImporting(false);
-                        Alert.alert('Complete', `Imported ${successCount} transactions.`);
+                        
+                        if (failCount > 0) {
+                            Alert.alert('Import Complete', 
+                                `Successfully imported ${successCount} transaction${successCount !== 1 ? 's' : ''}.\n${failCount} failed.`);
+                        } else {
+                            Alert.alert('Success', 
+                                `Imported ${successCount} transaction${successCount !== 1 ? 's' : ''} successfully!`);
+                        }
                     },
                 },
             ]
@@ -201,7 +304,7 @@ export default function SMSTransactionsScreen({ navigation }) {
     const totals = calculateTotals();
 
     const renderTransaction = ({ item, index }) => (
-        <AnimatedView index={index} delay={50}>
+        <AnimatedView index={index % 10}>
             <View style={styles.transactionItem}>
                 <View style={styles.transactionHeader}>
                     <View style={styles.transactionIcon}>
@@ -215,7 +318,7 @@ export default function SMSTransactionsScreen({ navigation }) {
                         <Text style={styles.transactionTitle}>{item.bankName}</Text>
                         <Text style={styles.transactionCategory}>{item.reason}</Text>
                         <Text style={styles.transactionDate}>
-                            {new Date(item.timestamp).toLocaleDateString()}
+                            {new Date(item.timestamp).toLocaleDateString()} {new Date(item.timestamp).toLocaleTimeString()}
                         </Text>
                     </View>
                     <View style={styles.transactionRight}>
@@ -250,11 +353,11 @@ export default function SMSTransactionsScreen({ navigation }) {
         return (
             <View style={styles.container}>
                 <EmptyState
-                    icon="phone-portrait-outline"
-                    title="SMS Feature Unavailable"
-                    message="SMS reading requires a development build with native modules. This feature is not available in Expo Go."
-                    actionText="Show Demo Data"
-                    onAction={checkPermissionsAndLoad}
+                    icon="lock-closed-outline"
+                    title="Permission Required"
+                    message="SMS reading permission is required to automatically detect bank transactions from your messages."
+                    actionText="Grant Permission"
+                    onAction={requestSMSPermissions}
                 />
             </View>
         );
@@ -266,7 +369,7 @@ export default function SMSTransactionsScreen({ navigation }) {
                 <View style={styles.header}>
                     <View>
                         <Text style={styles.headerTitle}>SMS Transactions</Text>
-                        <Text style={styles.headerSubtitle}>Demo mode - showing sample data</Text>
+                        <Text style={styles.headerSubtitle}>Auto-detect bank transactions</Text>
                     </View>
                     <TouchableOpacity onPress={onRefresh} disabled={refreshing}>
                         <Ionicons name="refresh" size={24} color={theme.colors.primary} />
@@ -339,7 +442,7 @@ export default function SMSTransactionsScreen({ navigation }) {
             {loading ? (
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={theme.colors.primary} />
-                    <Text style={styles.loadingText}>Loading transactions...</Text>
+                    <Text style={styles.loadingText}>Reading SMS messages...</Text>
                 </View>
             ) : filteredTransactions.length > 0 ? (
                 <FlatList
@@ -355,8 +458,8 @@ export default function SMSTransactionsScreen({ navigation }) {
             ) : (
                 <EmptyState
                     icon="mail-outline"
-                    title="No Transactions"
-                    message="Demo transactions will appear here"
+                    title="No Transactions Found"
+                    message={hasPermission ? "No bank transactions detected in your SMS messages from the last 30 days." : "Grant SMS permission to detect bank transactions."}
                     actionText="Refresh"
                     onAction={onRefresh}
                 />
