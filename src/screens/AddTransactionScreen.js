@@ -18,7 +18,7 @@ import { theme } from '../styles/theme';
 export default function AddTransactionScreen({ navigation, route }) {
     const params = route.params || {};
     
-    const [amount, setAmount] = useState(params.amount || "");
+    const [amount, setAmount] = useState(params.amount ? String(params.amount) : "");
     const [title, setTitle] = useState(params.title || "");
     const [category, setCategory] = useState(params.category || "");
     const [type, setType] = useState('expense');
@@ -27,7 +27,7 @@ export default function AddTransactionScreen({ navigation, route }) {
 
     useEffect(() => {
         if (route.params) {
-            if (route.params.amount) setAmount(route.params.amount);
+            if (route.params.amount) setAmount(String(route.params.amount));
             if (route.params.title) setTitle(route.params.title);
             if (route.params.category) setCategory(route.params.category);
             if (route.params.note) setNote(route.params.note);
@@ -35,15 +35,17 @@ export default function AddTransactionScreen({ navigation, route }) {
     }, [route.params]);
 
     const handleSaveTransaction = async () => {
-        // Validation
-        if (!amount || !title || !category) {
+        // 1. Sanitize and Validate Amount
+        const cleanAmount = amount.replace(/[^0-9.]/g, '');
+        const numAmount = parseFloat(cleanAmount);
+
+        if (!cleanAmount || !title || !category) {
             Alert.alert('Error', 'Please fill in all required fields');
             return;
         }
 
-        const numAmount = parseFloat(amount);
         if (isNaN(numAmount) || numAmount <= 0) {
-            Alert.alert('Error', 'Please enter a valid amount');
+            Alert.alert('Error', 'Please enter a valid numeric amount');
             return;
         }
 
@@ -51,6 +53,7 @@ export default function AddTransactionScreen({ navigation, route }) {
 
         try {
             // Prepare transaction data
+            // Expenses are stored as negative, Income as positive
             const transactionData = {
                 title: title.trim(),
                 amount: type === 'expense' ? -Math.abs(numAmount) : Math.abs(numAmount),
@@ -70,14 +73,17 @@ export default function AddTransactionScreen({ navigation, route }) {
                         getTransactions(),
                         getBudgets()
                     ]);
-                    
-                    // Check budget and send notifications
                     await checkBudgetAndNotify(transactions, budgets);
                 } catch (notifError) {
                     console.error('Error checking budget notifications:', notifError);
-                    // Don't block the user if notification fails
                 }
             }
+
+            // Success: Reset state and Navigate
+            setAmount("");
+            setTitle("");
+            setCategory("");
+            setNote("");
 
             Alert.alert(
                 'Success',
@@ -93,10 +99,7 @@ export default function AddTransactionScreen({ navigation, route }) {
             );
         } catch (error) {
             console.error('Error saving transaction:', error);
-            Alert.alert(
-                'Error', 
-                'Failed to save transaction. Please try again.\n\n' + error.message
-            );
+            Alert.alert('Error', 'Failed to save: ' + error.message);
         } finally {
             setLoading(false);
         }
@@ -227,26 +230,16 @@ export default function AddTransactionScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: theme.colors.background,
-    },
-    content: {
-        padding: theme.spacing.md,
-    },
-    section: {
-        marginBottom: theme.spacing.lg,
-    },
+    container: { flex: 1, backgroundColor: theme.colors.background },
+    content: { padding: theme.spacing.md },
+    section: { marginBottom: theme.spacing.lg },
     sectionTitle: {
         fontSize: theme.fontSize.base,
         fontWeight: '600',
         color: theme.colors.text_secondary,
         marginBottom: theme.spacing.sm,
     },
-    typeSelector: {
-        flexDirection: 'row',
-        gap: theme.spacing.md,
-    },
+    typeSelector: { flexDirection: 'row', gap: theme.spacing.md },
     typeButton: {
         flex: 1,
         flexDirection: 'row',
@@ -259,22 +252,10 @@ const styles = StyleSheet.create({
         borderColor: theme.colors.gray[700],
         gap: theme.spacing.sm,
     },
-    activeExpenseButton: {
-        backgroundColor: theme.colors.danger,
-        borderColor: theme.colors.danger,
-    },
-    activeIncomeButton: {
-        backgroundColor: theme.colors.success,
-        borderColor: theme.colors.success,
-    },
-    typeButtonText: {
-        fontSize: theme.fontSize.base,
-        fontWeight: '600',
-        color: theme.colors.text_secondary,
-    },
-    activeTypeButtonText: {
-        color: theme.colors.white,
-    },
+    activeExpenseButton: { backgroundColor: theme.colors.danger, borderColor: theme.colors.danger },
+    activeIncomeButton: { backgroundColor: theme.colors.success, borderColor: theme.colors.success },
+    typeButtonText: { fontSize: theme.fontSize.base, fontWeight: '600', color: theme.colors.text_secondary },
+    activeTypeButtonText: { color: theme.colors.white },
     amountContainer: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -282,19 +263,8 @@ const styles = StyleSheet.create({
         borderRadius: theme.borderRadius.lg,
         paddingHorizontal: theme.spacing.md,
     },
-    currencySymbol: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        color: theme.colors.gray[400],
-        marginRight: theme.spacing.sm,
-    },
-    amountInput: {
-        flex: 1,
-        paddingVertical: theme.spacing.md,
-        fontSize: 24,
-        fontWeight: 'bold',
-        color: theme.colors.text_primary,
-    },
+    currencySymbol: { fontSize: 24, fontWeight: 'bold', color: theme.colors.gray[400], marginRight: theme.spacing.sm },
+    amountInput: { flex: 1, paddingVertical: theme.spacing.md, fontSize: 24, fontWeight: 'bold', color: theme.colors.text_primary },
     input: {
         backgroundColor: theme.colors.surface,
         borderRadius: theme.borderRadius.lg,
@@ -302,9 +272,7 @@ const styles = StyleSheet.create({
         fontSize: theme.fontSize.base,
         color: theme.colors.text_primary,
     },
-    noteInput: {
-        height: 120,
-    },
+    noteInput: { height: 120 },
     saveButton: {
         backgroundColor: theme.colors.primary,
         borderRadius: theme.borderRadius.lg,
@@ -312,12 +280,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginTop: theme.spacing.lg,
     },
-    saveButtonDisabled: {
-        backgroundColor: theme.colors.gray[600],
-    },
-    saveButtonText: {
-        color: theme.colors.white,
-        fontSize: theme.fontSize.lg,
-        fontWeight: 'bold',
-    },
+    saveButtonDisabled: { backgroundColor: theme.colors.gray[600] },
+    saveButtonText: { color: theme.colors.white, fontSize: theme.fontSize.lg, fontWeight: 'bold' },
 });

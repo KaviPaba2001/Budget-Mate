@@ -31,6 +31,8 @@ export default function DashboardScreen({ navigation }) {
     const [monthlyIncome, setMonthlyIncome] = useState(0);
     const [monthlyBudget, setMonthlyBudget] = useState(0);
 
+    const currencyFormat = { minimumFractionDigits: 2, maximumFractionDigits: 2 };
+
     useFocusEffect(
         useCallback(() => {
             loadData();
@@ -40,19 +42,16 @@ export default function DashboardScreen({ navigation }) {
     const loadData = async (isRefreshing = false) => {
         if (!isRefreshing) setLoading(true);
         try {
-            // 1. Get Transactions
             const data = await getTransactions();
             setTransactions(data);
             calculateFinancials(data);
 
-            // 2. Get Budgets
             let budgetsData = await getBudgets();
             if (Object.keys(budgetsData).length === 0) {
                 budgetsData = await seedDefaultBudgets();
             }
-            const totalBudget = Object.values(budgetsData).reduce((sum, amount) => sum + amount, 0);
+            const totalBudget = Object.values(budgetsData).reduce((sum, amt) => sum + amt, 0);
             setMonthlyBudget(totalBudget);
-
         } catch (error) {
             console.error('Error loading dashboard data:', error);
         } finally {
@@ -77,17 +76,11 @@ export default function DashboardScreen({ navigation }) {
 
         data.forEach(transaction => {
             const amount = transaction.amount || 0;
-            totalBalance += amount; // Income is positive, Expense is negative
+            totalBalance += amount;
 
-            // Parse Date
-            let tDate = new Date();
-            if (transaction.date) {
-                tDate = new Date(transaction.date);
-            } else if (transaction.createdAt?.toDate) {
-                tDate = transaction.createdAt.toDate();
-            }
+            let tDate = transaction.date ? new Date(transaction.date) : 
+                       (transaction.createdAt?.toDate ? transaction.createdAt.toDate() : new Date());
 
-            // Calculate Monthly Stats
             if (tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear) {
                 if (amount < 0) {
                     monthlyExp += Math.abs(amount);
@@ -102,8 +95,8 @@ export default function DashboardScreen({ navigation }) {
         setMonthlyIncome(monthlyInc);
     };
 
-    // Sort by date (newest first) and take top 5
-    const recentTransactions = transactions
+    // Use a copy to avoid mutating state
+    const recentTransactions = [...transactions]
         .sort((a, b) => {
             const dateA = a.date ? new Date(a.date) : new Date(0);
             const dateB = b.date ? new Date(b.date) : new Date(0);
@@ -112,27 +105,10 @@ export default function DashboardScreen({ navigation }) {
         .slice(0, 5);
 
     const quickActions = [
-        { 
-            icon: 'add-circle', 
-            title: 'Add', 
-            action: () => navigation.navigate('Transactions', { screen: 'AddTransaction' }) 
-        },
-        { 
-            icon: 'camera', 
-            title: 'Scan', 
-            action: () => navigation.navigate('Transactions', { screen: 'ScanReceipt' }) 
-        },
-        // THIS IS THE NEW SMS PART
-        { 
-            icon: 'chatbubbles', 
-            title: 'SMS Sync', 
-            action: () => navigation.navigate('Transactions', { screen: 'SMSTransactions' }) 
-        },
-        { 
-            icon: 'analytics', 
-            title: 'Reports', 
-            action: () => navigation.navigate('Reports') 
-        },
+        { icon: 'add-circle', title: 'Add', action: () => navigation.navigate('Transactions', { screen: 'AddTransaction' }) },
+        { icon: 'camera', title: 'Scan', action: () => navigation.navigate('Transactions', { screen: 'ScanReceipt' }) },
+        { icon: 'chatbubbles', title: 'SMS Sync', action: () => navigation.navigate('Transactions', { screen: 'SMSTransactions' }) },
+        { icon: 'analytics', title: 'Reports', action: () => navigation.navigate('Reports') },
     ];
 
     const handleQuickActionPress = (action) => {
@@ -152,13 +128,10 @@ export default function DashboardScreen({ navigation }) {
         <ScrollView 
             style={styles.container} 
             showsVerticalScrollIndicator={false}
-            refreshControl={
-                <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />
-            }
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />}
         >
             <StatusBar barStyle="light-content" />
             
-            {/* Header Section */}
             <AnimatedView index={0}>
                 <View style={styles.header}>
                     <View>
@@ -174,51 +147,45 @@ export default function DashboardScreen({ navigation }) {
                 </View>
             </AnimatedView>
 
-            {/* Balance Card */}
             <AnimatedView index={1}>
                 <View style={styles.balanceCard}>
                     <Text style={styles.balanceLabel}>Current Balance</Text>
-                    <Text style={[
-                        styles.balanceAmount, 
-                        { color: currentBalance >= 0 ? theme.colors.white : theme.colors.danger }
-                    ]}>
-                        Rs. {currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    <Text style={[styles.balanceAmount, { color: currentBalance >= 0 ? theme.colors.white : '#ff9999' }]}>
+                        Rs. {currentBalance.toLocaleString(undefined, currencyFormat)}
                     </Text>
                     
                     <View style={styles.balanceDetails}>
                         <View style={styles.balanceDetailItem}>
+                            {/* Fixed Icon: Income = Up */}
                             <View style={[styles.iconContainer, { backgroundColor: 'rgba(16, 185, 129, 0.2)' }]}>
-                                <Ionicons name="arrow-down" size={16} color={theme.colors.success} />
+                                <Ionicons name="arrow-up" size={16} color={theme.colors.success} />
                             </View>
                             <View>
                                 <Text style={styles.balanceDetailLabel}>Income</Text>
-                                <Text style={styles.incomeText}>+Rs. {monthlyIncome.toLocaleString()}</Text>
+                                <Text style={styles.incomeText}>+Rs. {monthlyIncome.toLocaleString(undefined, currencyFormat)}</Text>
                             </View>
                         </View>
                         <View style={styles.balanceDetailItem}>
+                            {/* Fixed Icon: Expense = Down */}
                             <View style={[styles.iconContainer, { backgroundColor: 'rgba(239, 68, 68, 0.2)' }]}>
-                                <Ionicons name="arrow-up" size={16} color={theme.colors.danger} />
+                                <Ionicons name="arrow-down" size={16} color={theme.colors.danger} />
                             </View>
                             <View>
                                 <Text style={styles.balanceDetailLabel}>Expenses</Text>
-                                <Text style={styles.expenseText}>-Rs. {monthlySpending.toLocaleString()}</Text>
+                                <Text style={styles.expenseText}>-Rs. {monthlySpending.toLocaleString(undefined, currencyFormat)}</Text>
                             </View>
                         </View>
                     </View>
                 </View>
             </AnimatedView>
 
-            {/* Quick Actions */}
+            {/* Quick Actions and Budget Card omitted for brevity but remain the same */}
             <AnimatedView index={2}>
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Quick Actions</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickActionsContainer}>
                         {quickActions.map((action, index) => (
-                            <AnimatedPressable
-                                key={index}
-                                style={styles.quickActionItem}
-                                onPress={() => handleQuickActionPress(action.action)}
-                            >
+                            <AnimatedPressable key={index} style={styles.quickActionItem} onPress={() => handleQuickActionPress(action.action)}>
                                 <View style={styles.quickActionIcon}>
                                     <Ionicons name={action.icon} size={24} color={theme.colors.primary} />
                                 </View>
@@ -229,7 +196,6 @@ export default function DashboardScreen({ navigation }) {
                 </View>
             </AnimatedView>
 
-            {/* Monthly Budget Progress */}
             <AnimatedView index={3}>
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Monthly Overview</Text>
@@ -237,7 +203,6 @@ export default function DashboardScreen({ navigation }) {
                 </View>
             </AnimatedView>
 
-            {/* Recent Transactions */}
             <AnimatedView index={4}>
                 <View style={styles.section}>
                     <View style={styles.sectionHeader}>
@@ -255,8 +220,9 @@ export default function DashboardScreen({ navigation }) {
                                         styles.transactionIcon, 
                                         { backgroundColor: item.amount > 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)' }
                                     ]}>
+                                        {/* Fixed Icon Logic here as well */}
                                         <Ionicons 
-                                            name={item.amount > 0 ? 'arrow-down' : 'arrow-up'} 
+                                            name={item.amount > 0 ? 'arrow-up' : 'arrow-down'} 
                                             size={20} 
                                             color={item.amount > 0 ? theme.colors.success : theme.colors.danger} 
                                         />
@@ -271,7 +237,7 @@ export default function DashboardScreen({ navigation }) {
                                         styles.transactionAmount,
                                         { color: item.amount > 0 ? theme.colors.success : theme.colors.danger }
                                     ]}>
-                                        {item.amount > 0 ? '+' : ''}Rs. {Math.abs(item.amount).toLocaleString()}
+                                        {item.amount > 0 ? '+' : ''}Rs. {Math.abs(item.amount).toLocaleString(undefined, currencyFormat)}
                                     </Text>
                                     <Text style={styles.transactionDate}>
                                         {formatDateForDisplay(item.date)}
@@ -294,26 +260,11 @@ export default function DashboardScreen({ navigation }) {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: theme.colors.background },
     centerContent: { justifyContent: 'center', alignItems: 'center' },
-    
-    header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingHorizontal: theme.spacing.md,
-        paddingTop: theme.spacing.lg,
-        paddingBottom: theme.spacing.sm,
-    },
+    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: theme.spacing.md, paddingTop: theme.spacing.lg, paddingBottom: theme.spacing.sm },
     headerWelcome: { fontSize: theme.fontSize.sm, color: theme.colors.text_secondary },
     headerUser: { fontSize: theme.fontSize['2xl'], fontWeight: 'bold', color: theme.colors.text_primary },
     avatar: { width: 45, height: 45, borderRadius: 22.5, borderWidth: 2, borderColor: theme.colors.primary },
-
-    balanceCard: {
-        backgroundColor: theme.colors.primary,
-        borderRadius: theme.borderRadius.xl,
-        padding: theme.spacing.lg,
-        margin: theme.spacing.md,
-        ...theme.shadow.md,
-    },
+    balanceCard: { backgroundColor: theme.colors.primary, borderRadius: theme.borderRadius.xl, padding: theme.spacing.lg, margin: theme.spacing.md, ...theme.shadow.md },
     balanceLabel: { color: 'rgba(255,255,255,0.8)', fontSize: theme.fontSize.sm, marginBottom: 4 },
     balanceAmount: { color: '#fff', fontSize: 32, fontWeight: 'bold', marginBottom: theme.spacing.lg },
     balanceDetails: { flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.2)', paddingTop: theme.spacing.md },
@@ -322,29 +273,15 @@ const styles = StyleSheet.create({
     balanceDetailLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
     incomeText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
     expenseText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
-
     section: { marginTop: theme.spacing.lg, paddingHorizontal: theme.spacing.md },
     sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: theme.spacing.sm },
     sectionTitle: { fontSize: theme.fontSize.lg, fontWeight: 'bold', color: theme.colors.text_primary, marginBottom: theme.spacing.sm },
     seeAllText: { color: theme.colors.primary, fontWeight: '600' },
-
     quickActionsContainer: { paddingVertical: 10, gap: 20 },
     quickActionItem: { alignItems: 'center', gap: 8 },
-    quickActionIcon: {
-        width: 56, height: 56, borderRadius: 28,
-        backgroundColor: theme.colors.surface,
-        justifyContent: 'center', alignItems: 'center',
-        borderWidth: 1, borderColor: theme.colors.border,
-        ...theme.shadow.sm
-    },
+    quickActionIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: theme.colors.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: theme.colors.border, ...theme.shadow.sm },
     quickActionText: { color: theme.colors.text_secondary, fontSize: 12, fontWeight: '500' },
-
-    transactionItem: {
-        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-        backgroundColor: theme.colors.surface,
-        padding: 16, borderRadius: 16, marginBottom: 12,
-        borderWidth: 1, borderColor: theme.colors.border
-    },
+    transactionItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: theme.colors.surface, padding: 16, borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor: theme.colors.border },
     transactionLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
     transactionIcon: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
     transactionTitle: { fontSize: 16, fontWeight: '600', color: theme.colors.text_primary },
@@ -352,7 +289,6 @@ const styles = StyleSheet.create({
     transactionRight: { alignItems: 'flex-end' },
     transactionAmount: { fontSize: 16, fontWeight: 'bold' },
     transactionDate: { fontSize: 11, color: theme.colors.text_secondary, marginTop: 2 },
-
     emptyContainer: { alignItems: 'center', padding: 40, opacity: 0.5 },
     emptyText: { color: theme.colors.text_secondary, marginTop: 10 }
 });
