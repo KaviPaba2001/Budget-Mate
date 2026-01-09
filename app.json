@@ -47,16 +47,7 @@
     "plugins": [
       "expo-local-authentication",
       "expo-secure-store",
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/notification_icon.png",
-          "color": "#6366f1",
-          "sounds": [
-            "./assets/notification_sound.wav"
-          ]
-        }
-      ],
+      "expo-notifications",
       "expo-font"
     ],
     "extra": {
