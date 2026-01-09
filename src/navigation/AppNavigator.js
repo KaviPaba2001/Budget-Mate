@@ -5,7 +5,7 @@ import * as Haptics from 'expo-haptics';
 import { Text } from 'react-native';
 import { theme } from '../styles/theme';
 
-// Import screens - Cards screens removed
+// Import screens
 import AboutScreen from '../screens/AboutScreen';
 import AddTransactionScreen from '../screens/AddTransactionScreen';
 import BudgetScreen from '../screens/BudgetScreen';
@@ -14,10 +14,9 @@ import EditProfileScreen from '../screens/EditProfileScreen';
 import ReportsScreen from '../screens/ReportsScreen';
 import ScanReceiptScreen from '../screens/ScanReceiptScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import SMSTransactionsScreen from '../screens/SMSTransactionsScreen';
 import TransactionDetailScreen from '../screens/TransactionDetailScreen';
 import TransactionsScreen from '../screens/TransactionsScreen';
-// Added SMS Screen Import
-import SMSTransactionsScreen from '../screens/SMSTransactionsScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -37,8 +36,6 @@ function TransactionsStack() {
             <Stack.Screen name="TransactionDetail" component={TransactionDetailScreen} options={{ title: 'Transaction Details' }} />
             <Stack.Screen name="AddTransaction" component={AddTransactionScreen} options={{ title: 'Add Transaction' }} />
             <Stack.Screen name="ScanReceipt" component={ScanReceiptScreen} options={{ title: 'Scan Receipt' }} />
-            {/* Added SMS Screen Route */}
-            <Stack.Screen name="SMSTransactions" component={SMSTransactionsScreen} options={{ title: 'SMS Transactions', headerShown: false }} />
         </Stack.Navigator>
     );
 }
@@ -76,15 +73,31 @@ export default function AppNavigator({ onLogout }) {
                 tabBarIcon: ({ focused, color, size }) => {
                     let iconName;
                     if (route.name === 'Dashboard') iconName = focused ? 'home' : 'home-outline';
-                    else if (route.name === 'Transactions') iconName = focused ? 'list' : 'list-outline';
+                    else if (route.name === 'Transactions') iconName = focused ? 'swap-horizontal' : 'swap-horizontal-outline';
+                    else if (route.name === 'SMS') iconName = focused ? 'chatbubbles' : 'chatbubbles-outline';
                     else if (route.name === 'Budget') iconName = focused ? 'pie-chart' : 'pie-chart-outline';
                     else if (route.name === 'Settings') iconName = focused ? 'settings' : 'settings-outline';
                     return <Ionicons name={iconName} size={size} color={color} />;
                 },
-                tabBarLabel: ({ color, focused }) => <Text style={{ color, fontSize: 10, fontWeight: focused ? 'bold' : 'normal', paddingBottom: 5 }}>{route.name}</Text>,
+                tabBarLabel: ({ color, focused }) => {
+                    let label;
+                    if (route.name === 'Dashboard') label = 'Dashboard';
+                    else if (route.name === 'Transactions') label = 'Transactions';
+                    else if (route.name === 'SMS') label = 'SMS';
+                    else if (route.name === 'Budget') label = 'Budget';
+                    else if (route.name === 'Settings') label = 'Settings';
+                    return <Text style={{ color, fontSize: 10, fontWeight: focused ? 'bold' : 'normal', marginTop: 4 }}>{label}</Text>;
+                },
                 tabBarActiveTintColor: theme.colors.primary,
                 tabBarInactiveTintColor: theme.colors.text_secondary,
-                tabBarStyle: { backgroundColor: theme.colors.surface, borderTopColor: theme.colors.gray[700], height: 60 },
+                tabBarStyle: { 
+                    backgroundColor: theme.colors.surface, 
+                    borderTopColor: theme.colors.gray[700], 
+                    borderTopWidth: 1,
+                    height: 70,
+                    paddingBottom: 10,
+                    paddingTop: 8,
+                },
                 headerShown: false,
             })}
         >
@@ -103,6 +116,12 @@ export default function AppNavigator({ onLogout }) {
                         navigation.navigate('Transactions', { screen: 'TransactionsList' });
                     },
                 })}
+            />
+            <Tab.Screen 
+                name="SMS" 
+                component={SMSTransactionsScreen}
+                options={{ headerShown: false }}
+                listeners={{ tabPress: () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light) }}
             />
             <Tab.Screen 
                 name="Budget" 
