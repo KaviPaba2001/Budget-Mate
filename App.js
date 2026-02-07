@@ -18,6 +18,8 @@ import AppNavigator from './src/navigation/AppNavigator';
 import EmailLoginScreen from './src/screens/EmailLoginScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
+// ✅ Import network helpers
+import { initializeNetworkListener } from './src/utils/networkHelpers';
 
 const AuthStack = createStackNavigator();
 
@@ -73,8 +75,15 @@ export default function App() {
     const lastActivityRef = useRef(Date.now());
     const sessionTimeoutRef = useRef(null);
     const appStateRef = useRef(AppState.currentState);
+    
+    // ✅ Network listener cleanup reference
+    const networkUnsubscribeRef = useRef(null);
 
     useEffect(() => {
+        // ✅ Initialize network monitoring
+        console.log('Initializing network listener...');
+        networkUnsubscribeRef.current = initializeNetworkListener();
+        
         const unsubscribe = onAuthStateChanged(
             auth, 
             (authUser) => {
@@ -99,9 +108,15 @@ export default function App() {
         const subscription = AppState.addEventListener('change', handleAppStateChange);
 
         return () => {
-            console.log('Cleaning up auth listener');
+            console.log('Cleaning up auth listener and network listener');
             unsubscribe();
             subscription.remove();
+            
+            // ✅ Cleanup network listener
+            if (networkUnsubscribeRef.current) {
+                networkUnsubscribeRef.current();
+            }
+            
             if (sessionTimeoutRef.current) {
                 clearTimeout(sessionTimeoutRef.current);
             }
@@ -207,6 +222,11 @@ export default function App() {
                 console.log('Offline logout - clearing local session');
                 // Force local logout
                 setUser(null);
+                Alert.alert(
+                    'Logged Out Offline',
+                    'You have been logged out locally. Your session will be cleared from the server when you reconnect.',
+                    [{ text: 'OK' }]
+                );
             } else {
                 Alert.alert('Error', 'Failed to logout. Please try again.');
             }

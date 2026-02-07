@@ -1,4 +1,4 @@
-// ReportsScreen.js - Enhanced Version with Weekly & Monthly Reports
+// ReportsScreen.js - FIXED VERSION with proper user scoping
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -23,9 +23,10 @@ import Animated, {
 import { auth, db } from '../../firebase';
 import { theme } from '../styles/theme';
 
-// Cache keys
+// ✅ FIX: Include user ID in cache keys to prevent cross-account data leakage
 const WEEKLY_REPORT_CACHE_KEY = 'weekly_report_cache';
 const MONTHLY_REPORT_CACHE_KEY = 'monthly_report_cache';
+const USER_ID_CACHE_KEY = 'cached_user_id';
 
 // Category configuration
 const CATEGORY_CONFIG = {
@@ -108,11 +109,43 @@ export default function ReportsScreen({ navigation }) {
     const [loading, setLoading] = useState(true);
     const [transactions, setTransactions] = useState([]);
     const [selectedCategory, setSelectedCategory] = useState(null);
+    const [currentUserId, setCurrentUserId] = useState(null);
+    
+    // ✅ FIX: Track current user and clear cache on user change
+    useEffect(() => {
+        const checkUserAndClearCache = async () => {
+            const user = auth.currentUser;
+            if (user) {
+                const userId = user.uid;
+                setCurrentUserId(userId);
+                
+                // Check if user has changed
+                const cachedUserId = await AsyncStorage.getItem(USER_ID_CACHE_KEY);
+                
+                if (cachedUserId && cachedUserId !== userId) {
+                    // Different user - clear all cached data
+                    console.log('User changed, clearing cached report data');
+                    await AsyncStorage.multiRemove([
+                        WEEKLY_REPORT_CACHE_KEY,
+                        MONTHLY_REPORT_CACHE_KEY,
+                        USER_ID_CACHE_KEY
+                    ]);
+                }
+                
+                // Store current user ID
+                await AsyncStorage.setItem(USER_ID_CACHE_KEY, userId);
+            }
+        };
+        
+        checkUserAndClearCache();
+    }, []);
     
     // Load transactions when view mode or offset changes
     useEffect(() => {
-        loadData();
-    }, [timeOffset, viewMode]);
+        if (currentUserId) {
+            loadData();
+        }
+    }, [timeOffset, viewMode, currentUserId]);
 
     const loadData = async () => {
         setLoading(true);
@@ -123,19 +156,28 @@ export default function ReportsScreen({ navigation }) {
             
             const { start, end } = bounds;
             
+            // ✅ FIX: Include user ID in cache key
+            const cacheKey = `${viewMode === 'weekly' ? WEEKLY_REPORT_CACHE_KEY : MONTHLY_REPORT_CACHE_KEY}_${currentUserId}_${start.getTime()}`;
+            
             // Try cache first for current period
-            const cacheKey = `${viewMode === 'weekly' ? WEEKLY_REPORT_CACHE_KEY : MONTHLY_REPORT_CACHE_KEY}_${start.getTime()}`;
             const cachedData = await AsyncStorage.getItem(cacheKey);
             
             if (cachedData && timeOffset === 0) {
+                console.log('Using cached report data for current user');
                 setTransactions(JSON.parse(cachedData));
                 setLoading(false);
                 return;
             }
             
-            // Fetch from Firestore
+            // ✅ FIX: Fetch from Firestore with proper user scoping
             const userId = auth.currentUser?.uid;
-            if (!userId) throw new Error('User not authenticated');
+            if (!userId) {
+                console.error('No user authenticated');
+                throw new Error('User not authenticated');
+            }
+            
+            console.log('Fetching transactions for user:', userId);
+            console.log('Date range:', start, 'to', end);
             
             const transactionsRef = collection(db, 'users', userId, 'transactions');
             const q = query(
@@ -156,16 +198,18 @@ export default function ReportsScreen({ navigation }) {
                 });
             });
             
+            console.log(`Loaded ${txnData.length} transactions for current period`);
+            
             setTransactions(txnData);
             
-            // Cache current period data
+            // Cache current period data with user ID
             if (timeOffset === 0) {
                 await AsyncStorage.setItem(cacheKey, JSON.stringify(txnData));
             }
             
         } catch (error) {
             console.error('Error loading data:', error);
-            Alert.alert('Error', 'Failed to load report data');
+            Alert.alert('Error', 'Failed to load report data: ' + error.message);
         } finally {
             setLoading(false);
         }
@@ -366,6 +410,7 @@ export default function ReportsScreen({ navigation }) {
             
             const reportText = `
 ${viewMode.toUpperCase()} FINANCIAL REPORT
+User: ${auth.currentUser?.email || 'Unknown'}
 ${dateRange}
 
 SUMMARY
