@@ -1,16 +1,27 @@
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
+import { LinearGradient } from 'expo-linear-gradient';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import React, { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
     AppState,
+    Image,
+    StatusBar,
     StyleSheet,
     Text,
     TouchableOpacity,
     View
 } from 'react-native';
+import Animated, {
+    Easing,
+    useAnimatedStyle,
+    useSharedValue,
+    withRepeat,
+    withSequence,
+    withTiming
+} from 'react-native-reanimated';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { auth } from './firebase';
 import { UserProvider } from './src/context/UserContext';
@@ -18,16 +29,74 @@ import AppNavigator from './src/navigation/AppNavigator';
 import EmailLoginScreen from './src/screens/EmailLoginScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
-// ✅ Import network helpers
 import { initializeNetworkListener } from './src/utils/networkHelpers';
 
 const AuthStack = createStackNavigator();
 
-// ✅ Session timeout configuration
-const SESSION_TIMEOUT = 60 * 60 * 1000; // 1 hour
-const INACTIVITY_WARNING = 5 * 60 * 1000; // 5 minutes before timeout
+const SESSION_TIMEOUT = 60 * 60 * 1000;
+const INACTIVITY_WARNING = 5 * 60 * 1000;
 
-// Error Boundary Component
+const LoadingScreen = () => {
+    const opacity = useSharedValue(0);
+    const scale = useSharedValue(0.8);
+    const pulseScale = useSharedValue(1);
+
+    useEffect(() => {
+        opacity.value = withTiming(1, { duration: 800, easing: Easing.out(Easing.ease) });
+        scale.value = withTiming(1, { duration: 800, easing: Easing.out(Easing.ease) });
+        
+        pulseScale.value = withRepeat(
+            withSequence(
+                withTiming(1.05, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
+                withTiming(1, { duration: 1000, easing: Easing.inOut(Easing.ease) })
+            ),
+            -1,
+            false
+        );
+    }, []);
+
+    const animatedContainerStyle = useAnimatedStyle(() => ({
+        opacity: opacity.value,
+        transform: [{ scale: scale.value }],
+    }));
+
+    const animatedImageStyle = useAnimatedStyle(() => ({
+        transform: [{ scale: pulseScale.value }],
+    }));
+
+    return (
+        <LinearGradient
+            colors={['#111827', '#1f2937', '#111827']}
+            style={styles.loadingContainer}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+        >
+            <StatusBar barStyle="light-content" backgroundColor="#111827" />
+            
+            <Animated.View style={[styles.loadingContent, animatedContainerStyle]}>
+                <Animated.View style={[styles.imageContainer, animatedImageStyle]}>
+                    <Image
+                        source={require('./assets/images/loading.png')}
+                        style={styles.loadingImage}
+                        resizeMode="contain"
+                    />
+                </Animated.View>
+
+                <Text style={styles.loadingTitle}>Budget Mate</Text>
+                <Text style={styles.loadingSubtitle}>Your Personal Finance Manager</Text>
+
+                <View style={styles.loadingIndicatorContainer}>
+                    <ActivityIndicator size="large" color="#10b981" />
+                    <Text style={styles.loadingText}>Initializing...</Text>
+                </View>
+            </Animated.View>
+
+            <View style={styles.decorativeCircle1} />
+            <View style={styles.decorativeCircle2} />
+        </LinearGradient>
+    );
+};
+
 class AppErrorBoundary extends React.Component {
     constructor(props) {
         super(props);
@@ -71,16 +140,12 @@ export default function App() {
     const [initializing, setInitializing] = useState(true);
     const [pendingOperations, setPendingOperations] = useState([]);
     
-    // ✅ Session management state
     const lastActivityRef = useRef(Date.now());
     const sessionTimeoutRef = useRef(null);
     const appStateRef = useRef(AppState.currentState);
-    
-    // ✅ Network listener cleanup reference
     const networkUnsubscribeRef = useRef(null);
 
     useEffect(() => {
-        // ✅ Initialize network monitoring
         console.log('Initializing network listener...');
         networkUnsubscribeRef.current = initializeNetworkListener();
         
@@ -91,20 +156,22 @@ export default function App() {
                 setUser(authUser);
                 
                 if (authUser) {
-                    // ✅ Start session monitoring
                     startSessionMonitoring();
                 }
                 
-                if (initializing) setInitializing(false);
+                setTimeout(() => {
+                    setInitializing(false);
+                }, 2000);
             },
             (error) => {
                 console.error('Auth State Error:', error);
                 Alert.alert('Authentication Error', 'Please restart the app.');
-                if (initializing) setInitializing(false);
+                setTimeout(() => {
+                    setInitializing(false);
+                }, 2000);
             }
         );
 
-        // ✅ Monitor app state changes for session management
         const subscription = AppState.addEventListener('change', handleAppStateChange);
 
         return () => {
@@ -112,7 +179,6 @@ export default function App() {
             unsubscribe();
             subscription.remove();
             
-            // ✅ Cleanup network listener
             if (networkUnsubscribeRef.current) {
                 networkUnsubscribeRef.current();
             }
@@ -121,24 +187,20 @@ export default function App() {
                 clearTimeout(sessionTimeoutRef.current);
             }
         };
-    }, [initializing]);
+    }, []);
 
-    // ✅ FIX TC035: Handle app state changes (screen lock)
     const handleAppStateChange = (nextAppState) => {
         if (appStateRef.current.match(/inactive|background/) && nextAppState === 'active') {
-            // App came to foreground
             checkSessionValidity();
         }
         appStateRef.current = nextAppState;
     };
 
-    // ✅ Start session monitoring
     const startSessionMonitoring = () => {
         lastActivityRef.current = Date.now();
         resetSessionTimeout();
     };
 
-    // ✅ Reset session timeout
     const resetSessionTimeout = () => {
         if (sessionTimeoutRef.current) {
             clearTimeout(sessionTimeoutRef.current);
@@ -149,14 +211,12 @@ export default function App() {
         }, SESSION_TIMEOUT);
     };
 
-    // ✅ Check if session is still valid
     const checkSessionValidity = async () => {
         const timeSinceActivity = Date.now() - lastActivityRef.current;
         
         if (timeSinceActivity > SESSION_TIMEOUT) {
             handleSessionExpiry();
         } else if (timeSinceActivity > SESSION_TIMEOUT - INACTIVITY_WARNING) {
-            // Warn user session is about to expire
             const remaining = Math.ceil((SESSION_TIMEOUT - timeSinceActivity) / 60000);
             Alert.alert(
                 'Session Expiring',
@@ -172,7 +232,6 @@ export default function App() {
         }
     };
 
-    // ✅ Handle session expiry
     const handleSessionExpiry = () => {
         Alert.alert(
             'Session Expired',
@@ -181,9 +240,7 @@ export default function App() {
         );
     };
 
-    // ✅ FIX TC031, TC044: Check for pending operations before logout
     const handleLogout = async () => {
-        // ✅ Check if there are unsaved changes
         if (pendingOperations.length > 0) {
             Alert.alert(
                 'Unsaved Changes',
@@ -207,7 +264,6 @@ export default function App() {
         try {
             console.log('Logging out user...');
             
-            // Clear session timeout
             if (sessionTimeoutRef.current) {
                 clearTimeout(sessionTimeoutRef.current);
             }
@@ -217,10 +273,8 @@ export default function App() {
         } catch (error) {
             console.error('Logout error:', error);
             
-            // ✅ FIX TC038: Always allow logout locally even if network fails
             if (error.code === 'unavailable' || error.message.includes('network')) {
                 console.log('Offline logout - clearing local session');
-                // Force local logout
                 setUser(null);
                 Alert.alert(
                     'Logged Out Offline',
@@ -235,21 +289,12 @@ export default function App() {
 
     const handleLogin = () => {
         console.log("Login successful");
-        // Reset session tracking
         lastActivityRef.current = Date.now();
         startSessionMonitoring();
     };
 
     if (initializing) {
-        return (
-            <SafeAreaProvider>
-                <SafeAreaView style={styles.container}>
-                    <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="large" color="#10b981" />
-                    </View>
-                </SafeAreaView>
-            </SafeAreaProvider>
-        );
+        return <LoadingScreen />;
     }
 
     return (
@@ -292,6 +337,64 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         backgroundColor: '#111827',
+        position: 'relative',
+    },
+    loadingContent: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 10,
+    },
+    imageContainer: {
+        marginBottom: 40,
+        shadowColor: '#10b981',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.3,
+        shadowRadius: 20,
+        elevation: 10,
+    },
+    loadingImage: {
+        width: 180,
+        height: 180,
+    },
+    loadingTitle: {
+        fontSize: 36,
+        fontWeight: 'bold',
+        color: '#f9fafb',
+        marginBottom: 8,
+        letterSpacing: 1,
+    },
+    loadingSubtitle: {
+        fontSize: 16,
+        color: '#9ca3af',
+        marginBottom: 50,
+        letterSpacing: 0.5,
+    },
+    loadingIndicatorContainer: {
+        alignItems: 'center',
+        gap: 16,
+    },
+    loadingText: {
+        fontSize: 14,
+        color: '#6b7280',
+        marginTop: 8,
+    },
+    decorativeCircle1: {
+        position: 'absolute',
+        width: 300,
+        height: 300,
+        borderRadius: 150,
+        backgroundColor: 'rgba(16, 185, 129, 0.05)',
+        top: -100,
+        left: -100,
+    },
+    decorativeCircle2: {
+        position: 'absolute',
+        width: 250,
+        height: 250,
+        borderRadius: 125,
+        backgroundColor: 'rgba(16, 185, 129, 0.03)',
+        bottom: -80,
+        right: -80,
     },
     errorContainer: {
         flex: 1,
