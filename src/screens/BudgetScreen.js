@@ -1,3 +1,8 @@
+// src/screens/BudgetScreen.js - FIXED VERSION
+// Fixes:
+// 1. Improved date handling for SMS-imported transactions
+// 2. Better category spending calculation with debug logs
+
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useState } from 'react';
@@ -65,6 +70,10 @@ export default function BudgetScreen() {
                 budgetsData = await seedDefaultBudgets();
             }
             
+            console.log('=== BUDGET SCREEN DATA ===');
+            console.log('Transactions loaded:', transactionData.length);
+            console.log('Sample transactions:', transactionData.slice(0, 3));
+            
             setTransactions(transactionData);
             setCategoryBudgets(budgetsData);
 
@@ -76,6 +85,7 @@ export default function BudgetScreen() {
         }
     };
 
+    // ✅ FIXED: Improved category spending calculation
     const calculateCategorySpending = () => {
         const now = new Date();
         const currentMonth = now.getMonth();
@@ -83,20 +93,43 @@ export default function BudgetScreen() {
 
         const categorySpending = {};
 
+        console.log('=== CALCULATING CATEGORY SPENDING ===');
+        console.log('Current month:', currentMonth, 'Year:', currentYear);
+        console.log('Total transactions:', transactions.length);
+
         transactions.forEach(transaction => {
             if (transaction.type === 'expense') {
                 let transactionDate;
+                
+                // Handle multiple date formats
                 if (transaction.date) {
+                    // Could be ISO string, Date object, or timestamp
                     transactionDate = new Date(transaction.date);
-                } else if (transaction.createdAt?.toDate) {
-                    transactionDate = transaction.createdAt.toDate();
+                } else if (transaction.createdAt) {
+                    // Handle Firestore Timestamp
+                    if (typeof transaction.createdAt.toDate === 'function') {
+                        transactionDate = transaction.createdAt.toDate();
+                    } else {
+                        transactionDate = new Date(transaction.createdAt);
+                    }
+                } else if (transaction.timestamp) {
+                    // Handle timestamp field (from SMS)
+                    transactionDate = new Date(transaction.timestamp);
                 } else {
+                    console.warn('No date found for transaction:', transaction.id);
                     transactionDate = new Date();
                 }
 
-                if (transactionDate.getMonth() === currentMonth && 
-                    transactionDate.getFullYear() === currentYear) {
-                    
+                // Validate date
+                if (isNaN(transactionDate.getTime())) {
+                    console.warn('Invalid transaction date for:', transaction.id, transaction);
+                    transactionDate = new Date();
+                }
+
+                const txnMonth = transactionDate.getMonth();
+                const txnYear = transactionDate.getFullYear();
+
+                if (txnMonth === currentMonth && txnYear === currentYear) {
                     const category = transaction.category;
                     const amount = Math.abs(transaction.amount);
                     
@@ -104,10 +137,16 @@ export default function BudgetScreen() {
                         categorySpending[category] = 0;
                     }
                     categorySpending[category] += amount;
+                    
+                    console.log(`✅ Added ${amount} to ${category}, new total: ${categorySpending[category]}`);
+                } else {
+                    console.log(`❌ Skipped transaction - different month/year: ${txnMonth}/${txnYear}`);
                 }
             }
         });
 
+        console.log('=== FINAL CATEGORY SPENDING ===');
+        console.log(categorySpending);
         return categorySpending;
     };
 
@@ -238,19 +277,15 @@ export default function BudgetScreen() {
         }
     };
 
-    // ✅ FIXED: Enhanced delete handler with transaction checking
     const handleDeleteBudget = async () => {
         try {
             setLoading(true);
             
-            // Check for associated transactions
             const { count } = await checkBudgetTransactions(selectedBudget.id);
             
             if (count === 0) {
-                // No transactions - proceed with simple deletion
                 showSimpleDeleteConfirmation();
             } else {
-                // Has transactions - show reassignment options
                 setTransactionCount(count);
                 showTransactionWarning(count);
             }
@@ -263,7 +298,6 @@ export default function BudgetScreen() {
         }
     };
 
-    // ✅ NEW: Simple deletion confirmation (no transactions)
     const showSimpleDeleteConfirmation = () => {
         Alert.alert(
             'Delete Budget',
@@ -279,7 +313,6 @@ export default function BudgetScreen() {
         );
     };
 
-    // ✅ NEW: Transaction warning with reassignment options
     const showTransactionWarning = (count) => {
         Alert.alert(
             'Budget Has Associated Transactions',
@@ -306,7 +339,6 @@ export default function BudgetScreen() {
         );
     };
 
-    // ✅ NEW: Final confirmation for deleting budget AND transactions
     const showDeleteAllConfirmation = () => {
         Alert.alert(
             'Delete Budget and Transactions?',
@@ -322,7 +354,6 @@ export default function BudgetScreen() {
         );
     };
 
-    // ✅ NEW: Perform simple budget deletion (no transactions)
     const performSimpleDeletion = async () => {
         try {
             setLoading(true);
@@ -351,7 +382,6 @@ export default function BudgetScreen() {
         }
     };
 
-    // ✅ NEW: Perform budget and transaction deletion
     const performDeleteAll = async () => {
         try {
             setLoading(true);
@@ -376,7 +406,6 @@ export default function BudgetScreen() {
             setEditBudgetAmount("");
             setTransactionCount(0);
             
-            // Reload data to reflect changes
             loadData();
             
         } catch (error) {
@@ -387,7 +416,6 @@ export default function BudgetScreen() {
         }
     };
 
-    // ✅ NEW: Handle transaction reassignment
     const handleReassignTransactions = async () => {
         if (!targetCategory) {
             Alert.alert('Error', 'Please select a category to reassign transactions to.');
@@ -425,7 +453,6 @@ export default function BudgetScreen() {
             setTargetCategory(null);
             setTransactionCount(0);
             
-            // Reload data to reflect changes
             loadData();
             
         } catch (error) {
@@ -436,7 +463,6 @@ export default function BudgetScreen() {
         }
     };
 
-    // ✅ NEW: Get available categories for reassignment
     const getAvailableCategories = () => {
         return Object.keys(categoryBudgets).filter(cat => cat !== selectedBudget?.id);
     };
@@ -630,7 +656,7 @@ export default function BudgetScreen() {
                 </View>
             </Modal>
 
-            {/* ✅ NEW: Transaction Reassignment Modal */}
+            {/* Transaction Reassignment Modal */}
             <Modal
                 animationType="slide"
                 transparent={true}
@@ -656,7 +682,6 @@ export default function BudgetScreen() {
                             
                             <Text style={styles.inputLabel}>Select New Category</Text>
                             
-                            {/* Category Selection List */}
                             <View style={styles.categorySelectionList}>
                                 {getAvailableCategories().map((catId) => {
                                     const catName = categoryNames[catId] || catId.charAt(0).toUpperCase() + catId.slice(1);
@@ -925,7 +950,6 @@ const styles = StyleSheet.create({
         fontSize: theme.fontSize.base,
         fontWeight: 'bold',
     },
-    // ✅ NEW: Reassignment Modal Styles
     reassignmentInfo: {
         flexDirection: 'row',
         alignItems: 'center',

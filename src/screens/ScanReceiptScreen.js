@@ -22,7 +22,7 @@ import { theme } from '../styles/theme';
 // ==========================================
 // 🔑 CONFIGURATION
 // ==========================================
-const GEMINI_API_KEY = 'AIzaSyCRdZJ9GvSXO_cR5oQigPqzd01mCfdiB0Y'; 
+const GEMINI_API_KEY = 'AIzaSyAgNgQQARb2tCOzUy5218VeP7Vd3SI6uCA'; 
 const OCR_SPACE_API_KEY = 'K84979664988957'; 
 
 // ✅ FIX: Use the latest stable Flash model

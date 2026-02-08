@@ -1,3 +1,8 @@
+// src/screens/DashboardScreen.js - FIXED VERSION
+// Fixes:
+// 1. Removed SMS Sync button from quick actions
+// 2. Fixed text overflow in recent transactions with ellipsis
+
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
@@ -95,7 +100,6 @@ export default function DashboardScreen({ navigation }) {
         setMonthlyIncome(monthlyInc);
     };
 
-    // Use a copy to avoid mutating state
     const recentTransactions = [...transactions]
         .sort((a, b) => {
             const dateA = a.date ? new Date(a.date) : new Date(0);
@@ -104,10 +108,10 @@ export default function DashboardScreen({ navigation }) {
         })
         .slice(0, 5);
 
+    // ✅ FIXED: Removed SMS Sync from quick actions
     const quickActions = [
         { icon: 'add-circle', title: 'Add', action: () => navigation.navigate('Transactions', { screen: 'AddTransaction' }) },
         { icon: 'camera', title: 'Scan', action: () => navigation.navigate('Transactions', { screen: 'ScanReceipt' }) },
-        { icon: 'chatbubbles', title: 'SMS Sync', action: () => navigation.navigate('Transactions', { screen: 'SMSTransactions' }) },
         { icon: 'analytics', title: 'Reports', action: () => navigation.navigate('Reports') },
     ];
 
@@ -156,7 +160,6 @@ export default function DashboardScreen({ navigation }) {
                     
                     <View style={styles.balanceDetails}>
                         <View style={styles.balanceDetailItem}>
-                            {/* Fixed Icon: Income = Up */}
                             <View style={[styles.iconContainer, { backgroundColor: 'rgba(16, 185, 129, 0.2)' }]}>
                                 <Ionicons name="arrow-up" size={16} color={theme.colors.success} />
                             </View>
@@ -166,7 +169,6 @@ export default function DashboardScreen({ navigation }) {
                             </View>
                         </View>
                         <View style={styles.balanceDetailItem}>
-                            {/* Fixed Icon: Expense = Down */}
                             <View style={[styles.iconContainer, { backgroundColor: 'rgba(239, 68, 68, 0.2)' }]}>
                                 <Ionicons name="arrow-down" size={16} color={theme.colors.danger} />
                             </View>
@@ -179,7 +181,6 @@ export default function DashboardScreen({ navigation }) {
                 </View>
             </AnimatedView>
 
-            {/* Quick Actions and Budget Card omitted for brevity but remain the same */}
             <AnimatedView index={2}>
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Quick Actions</Text>
@@ -220,16 +221,28 @@ export default function DashboardScreen({ navigation }) {
                                         styles.transactionIcon, 
                                         { backgroundColor: item.amount > 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)' }
                                     ]}>
-                                        {/* Fixed Icon Logic here as well */}
                                         <Ionicons 
                                             name={item.amount > 0 ? 'arrow-up' : 'arrow-down'} 
                                             size={20} 
                                             color={item.amount > 0 ? theme.colors.success : theme.colors.danger} 
                                         />
                                     </View>
-                                    <View>
-                                        <Text style={styles.transactionTitle}>{item.title}</Text>
-                                        <Text style={styles.transactionCategory}>{item.category}</Text>
+                                    <View style={styles.transactionTextContainer}>
+                                        {/* ✅ FIXED: Added numberOfLines and ellipsizeMode */}
+                                        <Text 
+                                            style={styles.transactionTitle}
+                                            numberOfLines={1}
+                                            ellipsizeMode="tail"
+                                        >
+                                            {item.title}
+                                        </Text>
+                                        <Text 
+                                            style={styles.transactionCategory}
+                                            numberOfLines={1}
+                                            ellipsizeMode="tail"
+                                        >
+                                            {item.category}
+                                        </Text>
                                     </View>
                                 </View>
                                 <View style={styles.transactionRight}>
@@ -281,12 +294,45 @@ const styles = StyleSheet.create({
     quickActionItem: { alignItems: 'center', gap: 8 },
     quickActionIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: theme.colors.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: theme.colors.border, ...theme.shadow.sm },
     quickActionText: { color: theme.colors.text_secondary, fontSize: 12, fontWeight: '500' },
-    transactionItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: theme.colors.surface, padding: 16, borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor: theme.colors.border },
-    transactionLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    transactionItem: { 
+        flexDirection: 'row', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        backgroundColor: theme.colors.surface, 
+        padding: 16, 
+        borderRadius: 16, 
+        marginBottom: 12, 
+        borderWidth: 1, 
+        borderColor: theme.colors.border 
+    },
+    transactionLeft: { 
+        flexDirection: 'row', 
+        alignItems: 'center', 
+        gap: 12,
+        flex: 1, // ✅ FIXED: Allow left side to shrink
+        marginRight: 12, // ✅ FIXED: Add spacing before right side
+    },
     transactionIcon: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-    transactionTitle: { fontSize: 16, fontWeight: '600', color: theme.colors.text_primary },
-    transactionCategory: { fontSize: 12, color: theme.colors.text_secondary, textTransform: 'capitalize' },
-    transactionRight: { alignItems: 'flex-end' },
+    // ✅ FIXED: New container for text with flex
+    transactionTextContainer: {
+        flex: 1,
+    },
+    transactionTitle: { 
+        fontSize: 16, 
+        fontWeight: '600', 
+        color: theme.colors.text_primary,
+        // ✅ FIXED: These will be overridden by numberOfLines prop in component
+    },
+    transactionCategory: { 
+        fontSize: 12, 
+        color: theme.colors.text_secondary, 
+        textTransform: 'capitalize',
+        marginTop: 2,
+    },
+    transactionRight: { 
+        alignItems: 'flex-end',
+        minWidth: 100, // ✅ FIXED: Ensure right side has minimum width
+    },
     transactionAmount: { fontSize: 16, fontWeight: 'bold' },
     transactionDate: { fontSize: 11, color: theme.colors.text_secondary, marginTop: 2 },
     emptyContainer: { alignItems: 'center', padding: 40, opacity: 0.5 },
