@@ -10,11 +10,11 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
-    View,
+    View
 } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import BudgetCard from '../components/BudgetCard';
-import { deleteBudget, getBudgets, getTransactions, saveBudget, seedDefaultBudgets } from '../services/firebaseService';
+import { checkBudgetTransactions, deleteBudget, getBudgets, getTransactions, saveBudget, seedDefaultBudgets } from '../services/firebaseService';
 import { theme } from '../styles/theme';
 
 // Animated component for staggered entry
@@ -38,6 +38,7 @@ const AnimatedView = ({ children, index }) => {
 export default function BudgetScreen() {
     const [modalVisible, setModalVisible] = useState(false);
     const [editModalVisible, setEditModalVisible] = useState(false);
+    const [reassignmentModalVisible, setReassignmentModalVisible] = useState(false);
     const [selectedBudget, setSelectedBudget] = useState(null);
     const [newBudgetCategory, setNewBudgetCategory] = useState("");
     const [newBudgetAmount, setNewBudgetAmount] = useState("");
@@ -45,6 +46,8 @@ export default function BudgetScreen() {
     const [transactions, setTransactions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [categoryBudgets, setCategoryBudgets] = useState({});
+    const [transactionCount, setTransactionCount] = useState(0);
+    const [targetCategory, setTargetCategory] = useState(null);
 
     useFocusEffect(
         useCallback(() => {
@@ -235,7 +238,33 @@ export default function BudgetScreen() {
         }
     };
 
-    const handleDeleteBudget = () => {
+    // ✅ FIXED: Enhanced delete handler with transaction checking
+    const handleDeleteBudget = async () => {
+        try {
+            setLoading(true);
+            
+            // Check for associated transactions
+            const { count } = await checkBudgetTransactions(selectedBudget.id);
+            
+            if (count === 0) {
+                // No transactions - proceed with simple deletion
+                showSimpleDeleteConfirmation();
+            } else {
+                // Has transactions - show reassignment options
+                setTransactionCount(count);
+                showTransactionWarning(count);
+            }
+            
+        } catch (error) {
+            console.error('Error checking budget transactions:', error);
+            Alert.alert('Error', 'Failed to check budget transactions. Please try again.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // ✅ NEW: Simple deletion confirmation (no transactions)
+    const showSimpleDeleteConfirmation = () => {
         Alert.alert(
             'Delete Budget',
             `Are you sure you want to delete the budget for ${selectedBudget.category}?`,
@@ -244,29 +273,172 @@ export default function BudgetScreen() {
                 {
                     text: 'Delete',
                     style: 'destructive',
-                    onPress: async () => {
-                        try {
-                            await deleteBudget(selectedBudget.id);
-                            
-                            setCategoryBudgets(prev => {
-                                const newBudgets = { ...prev };
-                                delete newBudgets[selectedBudget.id];
-                                return newBudgets;
-                            });
-
-                            Alert.alert('Success', 'Budget deleted successfully!');
-                            setEditModalVisible(false);
-                            setSelectedBudget(null);
-                            setEditBudgetAmount("");
-
-                        } catch (error) {
-                            console.error('Error deleting budget:', error);
-                            Alert.alert('Error', 'Failed to delete budget. Please try again.');
-                        }
-                    },
-                },
+                    onPress: performSimpleDeletion
+                }
             ]
         );
+    };
+
+    // ✅ NEW: Transaction warning with reassignment options
+    const showTransactionWarning = (count) => {
+        Alert.alert(
+            'Budget Has Associated Transactions',
+            `This budget has ${count} associated transaction${count !== 1 ? 's' : ''}. What would you like to do?`,
+            [
+                { 
+                    text: 'Cancel', 
+                    style: 'cancel',
+                    onPress: () => setEditModalVisible(false)
+                },
+                {
+                    text: 'Reassign Transactions',
+                    onPress: () => {
+                        setEditModalVisible(false);
+                        setReassignmentModalVisible(true);
+                    }
+                },
+                {
+                    text: 'Delete All',
+                    style: 'destructive',
+                    onPress: showDeleteAllConfirmation
+                }
+            ]
+        );
+    };
+
+    // ✅ NEW: Final confirmation for deleting budget AND transactions
+    const showDeleteAllConfirmation = () => {
+        Alert.alert(
+            'Delete Budget and Transactions?',
+            `This will permanently delete the ${selectedBudget.category} budget and all ${transactionCount} associated transaction${transactionCount !== 1 ? 's' : ''}. This action cannot be undone.`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete All',
+                    style: 'destructive',
+                    onPress: performDeleteAll
+                }
+            ]
+        );
+    };
+
+    // ✅ NEW: Perform simple budget deletion (no transactions)
+    const performSimpleDeletion = async () => {
+        try {
+            setLoading(true);
+            
+            await deleteBudget(selectedBudget.id, {
+                deleteTransactions: false,
+                reassignTo: null
+            });
+            
+            setCategoryBudgets(prev => {
+                const newBudgets = { ...prev };
+                delete newBudgets[selectedBudget.id];
+                return newBudgets;
+            });
+            
+            Alert.alert('Success', 'Budget deleted successfully!');
+            setEditModalVisible(false);
+            setSelectedBudget(null);
+            setEditBudgetAmount("");
+            
+        } catch (error) {
+            console.error('Error deleting budget:', error);
+            Alert.alert('Error', 'Failed to delete budget. Please try again.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // ✅ NEW: Perform budget and transaction deletion
+    const performDeleteAll = async () => {
+        try {
+            setLoading(true);
+            
+            const result = await deleteBudget(selectedBudget.id, {
+                deleteTransactions: true,
+                reassignTo: null
+            });
+            
+            setCategoryBudgets(prev => {
+                const newBudgets = { ...prev };
+                delete newBudgets[selectedBudget.id];
+                return newBudgets;
+            });
+            
+            Alert.alert(
+                'Success', 
+                `Budget deleted along with ${result.transactionsAffected} transaction${result.transactionsAffected !== 1 ? 's' : ''}.`
+            );
+            setEditModalVisible(false);
+            setSelectedBudget(null);
+            setEditBudgetAmount("");
+            setTransactionCount(0);
+            
+            // Reload data to reflect changes
+            loadData();
+            
+        } catch (error) {
+            console.error('Error deleting budget and transactions:', error);
+            Alert.alert('Error', 'Failed to delete budget. Please try again.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // ✅ NEW: Handle transaction reassignment
+    const handleReassignTransactions = async () => {
+        if (!targetCategory) {
+            Alert.alert('Error', 'Please select a category to reassign transactions to.');
+            return;
+        }
+        
+        if (targetCategory === selectedBudget.id) {
+            Alert.alert('Error', 'Cannot reassign to the same category.');
+            return;
+        }
+        
+        try {
+            setLoading(true);
+            setReassignmentModalVisible(false);
+            
+            const result = await deleteBudget(selectedBudget.id, {
+                deleteTransactions: false,
+                reassignTo: targetCategory
+            });
+            
+            setCategoryBudgets(prev => {
+                const newBudgets = { ...prev };
+                delete newBudgets[selectedBudget.id];
+                return newBudgets;
+            });
+            
+            Alert.alert(
+                'Success', 
+                `Budget deleted and ${result.transactionsAffected} transaction${result.transactionsAffected !== 1 ? 's were' : ' was'} reassigned to ${targetCategory}.`
+            );
+            
+            setEditModalVisible(false);
+            setSelectedBudget(null);
+            setEditBudgetAmount("");
+            setTargetCategory(null);
+            setTransactionCount(0);
+            
+            // Reload data to reflect changes
+            loadData();
+            
+        } catch (error) {
+            console.error('Error reassigning transactions:', error);
+            Alert.alert('Error', 'Failed to reassign transactions. Please try again.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // ✅ NEW: Get available categories for reassignment
+    const getAvailableCategories = () => {
+        return Object.keys(categoryBudgets).filter(cat => cat !== selectedBudget?.id);
     };
 
     if (loading) {
@@ -457,6 +629,84 @@ export default function BudgetScreen() {
                     </View>
                 </View>
             </Modal>
+
+            {/* ✅ NEW: Transaction Reassignment Modal */}
+            <Modal
+                animationType="slide"
+                transparent={true}
+                visible={reassignmentModalVisible}
+                onRequestClose={() => setReassignmentModalVisible(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Reassign Transactions</Text>
+                            <TouchableOpacity onPress={() => setReassignmentModalVisible(false)}>
+                                <Ionicons name="close" size={24} color={theme.colors.text_secondary} />
+                            </TouchableOpacity>
+                        </View>
+                        
+                        <View style={styles.modalBody}>
+                            <View style={styles.reassignmentInfo}>
+                                <Ionicons name="information-circle" size={24} color={theme.colors.primary} />
+                                <Text style={styles.reassignmentInfoText}>
+                                    {transactionCount} transaction{transactionCount !== 1 ? 's' : ''} will be moved from {selectedBudget?.category}
+                                </Text>
+                            </View>
+                            
+                            <Text style={styles.inputLabel}>Select New Category</Text>
+                            
+                            {/* Category Selection List */}
+                            <View style={styles.categorySelectionList}>
+                                {getAvailableCategories().map((catId) => {
+                                    const catName = categoryNames[catId] || catId.charAt(0).toUpperCase() + catId.slice(1);
+                                    const catIcon = categoryIcons[catId] || 'ellipsis-horizontal';
+                                    
+                                    return (
+                                        <TouchableOpacity
+                                            key={catId}
+                                            style={[
+                                                styles.categorySelectionItem,
+                                                targetCategory === catId && styles.categorySelectionItemSelected
+                                            ]}
+                                            onPress={() => setTargetCategory(catId)}
+                                            activeOpacity={0.7}
+                                        >
+                                            <View style={styles.categorySelectionIcon}>
+                                                <Ionicons name={catIcon} size={22} color={theme.colors.primary} />
+                                            </View>
+                                            <Text style={styles.categorySelectionText}>{catName}</Text>
+                                            {targetCategory === catId && (
+                                                <Ionicons name="checkmark-circle" size={24} color={theme.colors.primary} />
+                                            )}
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+                            
+                            <View style={styles.reassignmentNote}>
+                                <Ionicons name="bulb" size={16} color={theme.colors.warning} />
+                                <Text style={styles.reassignmentNoteText}>
+                                    All transactions will count toward the selected category's budget
+                                </Text>
+                            </View>
+                        </View>
+                        
+                        <TouchableOpacity 
+                            style={[styles.saveButton, !targetCategory && styles.saveButtonDisabled]} 
+                            onPress={handleReassignTransactions}
+                            disabled={!targetCategory || loading}
+                            activeOpacity={0.7}
+                        >
+                            {loading ? (
+                                <ActivityIndicator color={theme.colors.white} />
+                            ) : (
+                                <Text style={styles.saveButtonText}>Reassign & Delete Budget</Text>
+                            )}
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -601,6 +851,7 @@ const styles = StyleSheet.create({
     },
     modalContent: {
         width: '90%',
+        maxHeight: '80%',
         backgroundColor: theme.colors.surface,
         borderRadius: theme.borderRadius.xl,
         padding: theme.spacing.lg,
@@ -641,6 +892,10 @@ const styles = StyleSheet.create({
         paddingVertical: theme.spacing.md,
         alignItems: 'center',
     },
+    saveButtonDisabled: {
+        backgroundColor: theme.colors.gray[600],
+        opacity: 0.5,
+    },
     saveButtonText: {
         color: theme.colors.white,
         fontSize: theme.fontSize.base,
@@ -669,5 +924,68 @@ const styles = StyleSheet.create({
         color: theme.colors.white,
         fontSize: theme.fontSize.base,
         fontWeight: 'bold',
+    },
+    // ✅ NEW: Reassignment Modal Styles
+    reassignmentInfo: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: theme.colors.background,
+        padding: theme.spacing.md,
+        borderRadius: theme.borderRadius.lg,
+        marginBottom: theme.spacing.lg,
+        gap: theme.spacing.sm,
+    },
+    reassignmentInfoText: {
+        flex: 1,
+        fontSize: theme.fontSize.sm,
+        color: theme.colors.text_primary,
+        lineHeight: 20,
+    },
+    categorySelectionList: {
+        maxHeight: 300,
+        marginBottom: theme.spacing.md,
+    },
+    categorySelectionItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: theme.colors.background,
+        padding: theme.spacing.md,
+        borderRadius: theme.borderRadius.lg,
+        marginBottom: theme.spacing.sm,
+        borderWidth: 2,
+        borderColor: 'transparent',
+    },
+    categorySelectionItemSelected: {
+        borderColor: theme.colors.primary,
+        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    },
+    categorySelectionIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: theme.colors.surface,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: theme.spacing.md,
+    },
+    categorySelectionText: {
+        flex: 1,
+        fontSize: theme.fontSize.base,
+        color: theme.colors.text_primary,
+        fontWeight: '500',
+    },
+    reassignmentNote: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        backgroundColor: 'rgba(245, 158, 11, 0.1)',
+        padding: theme.spacing.sm,
+        borderRadius: theme.borderRadius.md,
+        gap: theme.spacing.xs,
+    },
+    reassignmentNoteText: {
+        flex: 1,
+        fontSize: theme.fontSize.xs,
+        color: theme.colors.text_secondary,
+        lineHeight: 16,
     },
 });

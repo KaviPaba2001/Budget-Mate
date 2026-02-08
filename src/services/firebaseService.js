@@ -13,7 +13,6 @@ import {
     writeBatch
 } from 'firebase/firestore';
 import { auth, db } from '../../firebase';
-// ✅ Import network helpers
 import { checkNetworkConnection, showNetworkError } from '../utils/networkHelpers';
 
 // Get current user ID
@@ -25,7 +24,7 @@ const getUserId = () => {
     return user.uid;
 };
 
-// ✅ Wrapper function for network-dependent operations
+// Wrapper function for network-dependent operations
 const withNetworkCheck = async (operation, operationName) => {
     const isOnline = await checkNetworkConnection();
     
@@ -38,7 +37,7 @@ const withNetworkCheck = async (operation, operationName) => {
     return await operation();
 };
 
-// --- Default Budgets (for new users) ---
+// Default Budgets (for new users)
 const defaultBudgets = {
     'food': 12000,
     'transport': 6000,
@@ -50,7 +49,6 @@ const defaultBudgets = {
 
 // --- Transaction Functions ---
 
-// Add a new transaction
 export const addTransaction = async (transactionData) => {
     return withNetworkCheck(async () => {
         try {
@@ -73,7 +71,6 @@ export const addTransaction = async (transactionData) => {
     }, 'add transaction');
 };
 
-// Get all transactions for current user
 export const getTransactions = async () => {
     return withNetworkCheck(async () => {
         try {
@@ -100,7 +97,6 @@ export const getTransactions = async () => {
     }, 'load transactions');
 };
 
-// Update a transaction
 export const updateTransaction = async (transactionId, updates) => {
     return withNetworkCheck(async () => {
         try {
@@ -138,14 +134,12 @@ export const updateTransaction = async (transactionId, updates) => {
     }, 'update transaction');
 };
 
-// Delete a transaction
 export const deleteTransaction = async (transactionId) => {
     return withNetworkCheck(async () => {
         try {
             console.log('=== deleteTransaction called ===');
             console.log('Transaction ID to delete:', transactionId);
             
-            // Check if user is authenticated
             const user = auth.currentUser;
             if (!user) {
                 console.error('No user authenticated');
@@ -155,17 +149,14 @@ export const deleteTransaction = async (transactionId) => {
             const userId = user.uid;
             console.log('User ID:', userId);
             
-            // Verify the transaction ID is valid
             if (!transactionId || typeof transactionId !== 'string') {
                 console.error('Invalid transaction ID:', transactionId);
                 throw new Error('Invalid transaction ID');
             }
             
-            // Create document reference
             const transactionRef = doc(db, 'users', userId, 'transactions', transactionId);
             console.log('Document reference path:', transactionRef.path);
             
-            // Attempt to delete
             console.log('Attempting to delete document...');
             await deleteDoc(transactionRef);
             
@@ -177,7 +168,6 @@ export const deleteTransaction = async (transactionId) => {
             console.error('Error message:', error.message);
             console.error('Error code:', error.code);
             
-            // Handle specific Firebase errors
             if (error.code === 'permission-denied') {
                 throw new Error('Permission denied. You do not have permission to delete this transaction.');
             } else if (error.code === 'not-found') {
@@ -191,7 +181,6 @@ export const deleteTransaction = async (transactionId) => {
     }, 'delete transaction');
 };
 
-// Get transactions by type (income/expense)
 export const getTransactionsByType = async (type) => {
     return withNetworkCheck(async () => {
         try {
@@ -222,7 +211,6 @@ export const getTransactionsByType = async (type) => {
     }, 'load transactions by type');
 };
 
-// Get transactions by category
 export const getTransactionsByCategory = async (category) => {
     return withNetworkCheck(async () => {
         try {
@@ -253,12 +241,8 @@ export const getTransactionsByCategory = async (category) => {
     }, 'load transactions by category');
 };
 
-
 // --- BUDGET FUNCTIONS ---
 
-/**
- * Gets all budgets for the current user.
- */
 export const getBudgets = async () => {
     return withNetworkCheck(async () => {
         try {
@@ -285,9 +269,6 @@ export const getBudgets = async () => {
     }, 'load budgets');
 };
 
-/**
- * Creates or updates a specific budget category.
- */
 export const saveBudget = async (category, amount) => {
     return withNetworkCheck(async () => {
         try {
@@ -312,9 +293,6 @@ export const saveBudget = async (category, amount) => {
     }, 'save budget');
 };
 
-/**
- * Saves the default budgets for a new user.
- */
 export const seedDefaultBudgets = async () => {
     return withNetworkCheck(async () => {
         try {
@@ -343,22 +321,118 @@ export const seedDefaultBudgets = async () => {
     }, 'create default budgets');
 };
 
-/**
- * Delete a budget category
- */
-export const deleteBudget = async (category) => {
+// ✅ NEW: Check if budget category has associated transactions
+export const checkBudgetTransactions = async (category) => {
+    return withNetworkCheck(async () => {
+        try {
+            const userId = getUserId();
+            const transactionsRef = collection(db, 'users', userId, 'transactions');
+            const q = query(
+                transactionsRef,
+                where('category', '==', category)
+            );
+            
+            const querySnapshot = await getDocs(q);
+            const transactions = [];
+            
+            querySnapshot.forEach((doc) => {
+                transactions.push({
+                    id: doc.id,
+                    ...doc.data()
+                });
+            });
+            
+            console.log(`Found ${transactions.length} transactions for category: ${category}`);
+            return {
+                count: transactions.length,
+                transactions: transactions
+            };
+        } catch (error) {
+            console.error('Error checking budget transactions:', error);
+            throw error;
+        }
+    }, 'check budget transactions');
+};
+
+// ✅ NEW: Reassign transactions from one category to another
+export const reassignTransactions = async (oldCategory, newCategory) => {
+    return withNetworkCheck(async () => {
+        try {
+            const userId = getUserId();
+            const transactionsRef = collection(db, 'users', userId, 'transactions');
+            const q = query(
+                transactionsRef,
+                where('category', '==', oldCategory)
+            );
+            
+            const querySnapshot = await getDocs(q);
+            const batch = writeBatch(db);
+            let updateCount = 0;
+            
+            querySnapshot.forEach((docSnapshot) => {
+                const docRef = doc(db, 'users', userId, 'transactions', docSnapshot.id);
+                batch.update(docRef, {
+                    category: newCategory,
+                    updatedAt: Timestamp.now(),
+                    previousCategory: oldCategory
+                });
+                updateCount++;
+            });
+            
+            await batch.commit();
+            console.log(`✅ Reassigned ${updateCount} transactions from ${oldCategory} to ${newCategory}`);
+            return updateCount;
+        } catch (error) {
+            console.error('Error reassigning transactions:', error);
+            throw error;
+        }
+    }, 'reassign transactions');
+};
+
+// ✅ FIXED: Delete budget category with transaction handling
+export const deleteBudget = async (category, options = {}) => {
+    const { deleteTransactions = false, reassignTo = null } = options;
+    
     return withNetworkCheck(async () => {
         try {
             console.log('=== deleteBudget called ===');
             console.log('Category to delete:', category);
+            console.log('Options:', options);
             
             const userId = getUserId();
-            const budgetRef = doc(db, 'users', userId, 'budgets', category);
             
+            // Check for transactions first
+            const { count, transactions } = await checkBudgetTransactions(category);
+            
+            if (count > 0) {
+                if (reassignTo) {
+                    // Reassign transactions to new category
+                    await reassignTransactions(category, reassignTo);
+                    console.log(`Reassigned ${count} transactions to ${reassignTo}`);
+                } else if (deleteTransactions) {
+                    // Delete all transactions in category
+                    const batch = writeBatch(db);
+                    transactions.forEach(txn => {
+                        const txnRef = doc(db, 'users', userId, 'transactions', txn.id);
+                        batch.delete(txnRef);
+                    });
+                    await batch.commit();
+                    console.log(`Deleted ${count} transactions`);
+                } else {
+                    throw new Error('Cannot delete budget with transactions without specifying action');
+                }
+            }
+            
+            // Delete the budget category
+            const budgetRef = doc(db, 'users', userId, 'budgets', category);
             await deleteDoc(budgetRef);
             
-            console.log('✅ Budget deleted successfully');
-            return category;
+            console.log('✅ Budget deletion completed');
+            return {
+                category,
+                transactionsAffected: count,
+                action: reassignTo ? 'reassigned' : (deleteTransactions ? 'deleted' : 'none')
+            };
         } catch (error) {
             console.error('Error deleting budget:', error);
             
